@@ -1,0 +1,32 @@
+[package]
+name = "uberlog"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+path = "src/lib.rs"
+name = "rtt_viewer_lib"
+
+[[bin]]
+path = "src/main.rs"
+name = "uberlog"
+
+[dependencies]
+chrono = "0.4.31"
+color-eyre = "0.5.11"
+eframe = "0.29.1"
+egui = "0.29.1"
+egui_extras = "0.29.1"
+elf = "0.7.4"
+parking_lot = "0.12.3"
+probe-rs = "0.25.0"
+rfd = "0.15.1"
+serde = "1.0.215"
+serde_yaml = "0.9.34"
+serialport = "4.6.0"
+strip-ansi-escapes = "0.2.0"
+tokio = { version = "1.41.0", features = ["rt", "rt-multi-thread", "time"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
