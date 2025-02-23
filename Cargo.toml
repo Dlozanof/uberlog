@@ -7,7 +7,7 @@ edition = "2021"
 
 [lib]
 path = "src/lib.rs"
-name = "rtt_viewer_lib"
+name = "uberlog_lib"
 
 [[bin]]
 path = "src/main.rs"
@@ -15,14 +15,12 @@ name = "uberlog"
 
 [dependencies]
 chrono = "0.4.31"
-color-eyre = "0.5.11"
-eframe = "0.29.1"
-egui = "0.29.1"
-egui_extras = "0.29.1"
 elf = "0.7.4"
 parking_lot = "0.12.3"
 probe-rs = "0.25.0"
-rfd = "0.15.1"
+color-eyre = "0.6.3"
+crossterm = "0.28.1"
+ratatui = "0.29.0"
 serde = "1.0.215"
 serde_yaml = "0.9.34"
 serialport = "4.6.0"

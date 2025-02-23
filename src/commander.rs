@@ -1,22 +1,46 @@
 use core::time;
-use std::{fs::read_to_string, io::Write, mem, path::PathBuf, sync::{mpsc::{Receiver, Sender}, Arc}, thread::{self, JoinHandle}};
+use std::{fs::read_to_string, io::Write, path::PathBuf, sync::mpsc::{Receiver, Sender}, thread::{self, JoinHandle}};
 
-use color_eyre::section;
 use elf::{endian::AnyEndian, ElfBytes};
-use parking_lot::FairMutex;
-use probe_rs::{probe::{self, list::Lister, DebugProbeInfo, Probe}, rtt::{Rtt, ScanRegion}, Permissions, Session, Target};
+use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
+use ratatui::style;
 use tracing::{error, info};
-use crate::configuration::{Configuration, LogBackend};
+use crate::{configuration::{Configuration, LogBackend}, LogFilter, LogFilterType, LogMessage};
 
 pub enum Command {
+
+    // File
+    OpenFile(std::path::PathBuf),
+
+    // Probes
     GetProbes,
     Connect(TargetInformation),
     Disconnect(String),
     Reset(String),
-    ReceiveDrawContext(egui::Context),
     StreamLogs(bool, String),
     ParseLogBytes(Vec<u8>),
-    OpenFile(std::path::PathBuf)
+
+    // Misc
+    PrintMessage(String),
+
+    // Filters
+    AddFilter(LogFilter),
+    ClearFilters,
+    GetFilters,
+
+    // Logs
+    ClearLogs,
+}
+
+
+pub enum CommandResponse {
+    TextMessage{message: String},
+    ProbeInformation{probes: Vec<TargetInformation>},
+
+    // Filters
+    ClearFilters,
+    UpdateFilterList(Vec<LogFilter>),
+    UpdateLogs(Vec<LogMessage>),
 }
 
 
@@ -55,10 +79,6 @@ impl TargetInformation {
 }
 
 
-pub enum CommandResponse {
-    TextMessage{message: String},
-    ProbeInformation{probes: Vec<TargetInformation>},
-}
 
 /// This class holds the whole state of a target MCU
 /// 
@@ -75,9 +95,9 @@ pub struct TargetMcu {
     /// Details about the log backend used by the target
     pub backend: LogBackendInformation,
 
-    pub rtt_thread_handle: Option<JoinHandle<()>>,
+    pub log_thread: Option<JoinHandle<()>>,
 
-    pub rtt_stream_thread_tx: Option<Sender<bool>>,
+    pub log_thread_control_tx: Option<Sender<bool>>,
 }
 
 pub struct Commander {
@@ -85,8 +105,9 @@ pub struct Commander {
     /// Connected target information
     pub probes: Vec<TargetMcu>,
 
-    /// Egui context for redraw
-    pub egui_ctx: Option<egui::Context>,
+    /// Log filtering feature
+    filters: Vec<LogFilter>,
+    logs_raw: Vec<String>,
 
     /// Configuration
     pub cfg: Configuration,
@@ -107,7 +128,7 @@ pub struct Commander {
     pub command_response_tx: Sender<CommandResponse>,
 
     // Store the rtt_tx channel for cloning purposes, will not use it directly
-    pub rtt_tx: Sender<String>
+    pub rtt_tx: Sender<LogMessage>
 }
 
 
@@ -116,10 +137,11 @@ impl Commander {
     /// 
     /// Intended to be used in the beginning of the aplication, to create the single commander that
     /// will handle all the connected probes and related targets
-    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<CommandResponse>, rtt_tx: Sender<String>, cfg: Configuration) -> Commander {
+    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<CommandResponse>, rtt_tx: Sender<LogMessage>, cfg: Configuration) -> Commander {
         let mut ret = Commander {
             probes: Vec::new(),
-            egui_ctx: None,
+            filters: Vec::new(),
+            logs_raw: Vec::new(),
             cfg,
             command_rx,
             command_tx,
@@ -129,7 +151,7 @@ impl Commander {
             stream_logs_file_handle: None,
             log_raw: Vec::new(),
         };
-        ret.init();
+        let _ = ret.init();
         ret
     }
 
@@ -140,10 +162,12 @@ impl Commander {
 
         if let Ok(content) = read_to_string(path) {
             for line in content.lines() {
-                self.rtt_tx.send(line.to_string());
-
-                if let Some(ectx) = &self.egui_ctx {
-                    ectx.request_repaint()
+                // Store it
+                self.logs_raw.push(line.to_string());
+                
+                // Apply filters
+                if let Some(log_message) = self.apply_filters(line.to_string()) {
+                    let _ = self.rtt_tx.send(log_message);
                 }
             }
         }
@@ -207,14 +231,78 @@ impl Commander {
                 Command::ParseLogBytes(bytes) => {
                     return self.cmd_parse_bytes(bytes);
                 }
-                Command::ReceiveDrawContext(ctx) => {
-                    self.egui_ctx = Some(ctx);
-                }
                 Command::OpenFile(path) => {
                     return self.cmd_open_file(path);
                 }
+                Command::PrintMessage(msg) => {
+                    let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: msg });
+                }
+                Command::AddFilter(filter) => {
+                    return self.add_filter(filter);
+                }
+                Command::ClearFilters => {
+                    return self.clear_filters();
+                }
+                Command::GetFilters => {
+                    let _ = self.command_response_tx.send(CommandResponse::UpdateFilterList(self.filters.clone()));
+                }
+                Command::ClearLogs => {
+                    return self.clear_logs();
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Clear logs
+    /// 
+    /// Remove all stored logs and request a clear also to the UI
+    fn clear_logs(&mut self) -> Result<(), String> {
+        self.logs_raw.clear();
+        let _ = self.command_response_tx.send(CommandResponse::UpdateLogs(Vec::new()));
+        Ok(())
+    }
+
+    /// Clear filters
+    /// 
+    /// Clear the available filters, and reprocess the log messages
+    fn clear_filters(&mut self) -> Result<(), String> {
+        
+        // Clear filters
+        self.filters.clear();
+
+        // Empty current log list
+        let filtered_messages: Vec<LogMessage> = self.logs_raw
+            .iter()
+            .map(|msg| self.apply_filters(msg.to_string()))
+            .map(|msg| msg.unwrap())
+            .collect();
+
+        let _ = self.command_response_tx.send(CommandResponse::UpdateLogs(filtered_messages));
+        Ok(())
+    }
+
+    /// Add a new filter
+    /// 
+    /// Not only store the new filter, but also regenerate the filtered log list and send it to the
+    /// application so it can update the log view
+    fn add_filter(&mut self, filter: LogFilter) -> Result<(), String> {
+        
+        // Add new filter
+        self.filters.push(filter.clone());
+
+        // Empty current log list
+        let filtered_messages: Vec<LogMessage> = self.logs_raw
+            .iter()
+            .map(|msg| self.apply_filters(msg.to_string()))
+            .filter(|msg| msg.is_some())
+            .map(|msg| msg.unwrap())
+            .collect();
+
+        let filt_len = filtered_messages.len();
+        let _ = self.command_response_tx.send(CommandResponse::UpdateLogs(filtered_messages));
+        let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: format!("Added: {:?} -- {}/{}", filter, filt_len, self.log_raw.len()) });
+
         Ok(())
     }
 
@@ -248,7 +336,9 @@ impl Commander {
             count = count + line.len();
 
             info!("Processing line <-- {} -->", line);
-            self.rtt_tx.send(line.to_string());
+
+            // Store it
+            self.logs_raw.push(line.to_string());
 
             // If we are streaming logs to a file, add the line to it
             if let Some(handle) =  &mut self.stream_logs_file_handle {
@@ -256,17 +346,14 @@ impl Commander {
                     error!("Handle not null even though streaming is disabled!!");
                 }
 
-                handle.write_all(line.as_bytes());
+                let _ = handle.write_all(line.as_bytes());
             }
 
-            // And request redraw if the egui context is available (should)
-            match &self.egui_ctx {
-                Some(ctx) => {
-                    info!("Repaint");
-                    ctx.request_repaint()
-                },
-                None => (),
-            };
+            // Apply filters
+            if let Some(log_message) = self.apply_filters(line.to_string()) {
+                //let log_message = ratatui::text::Line::from(log_message.message).style(log_message.color);
+                let _ = self.rtt_tx.send(log_message);
+            }
         }
 
         // Let's try to be as ineficient as possible
@@ -282,7 +369,7 @@ impl Commander {
     fn cmd_reset(&mut self, probe_serial: String) -> Result<(), String> {
         let probe_info = self.probes.iter_mut().find(|target_mcu| *target_mcu.probe_info.serial_number.as_ref().unwrap() == probe_serial).ok_or("Unable to find probe")?;
 
-        if probe_info.rtt_stream_thread_tx.is_some() {
+        if probe_info.log_thread_control_tx.is_some() {
             return Err(String::from("Target is connected, can't reset"));
         }
 
@@ -319,11 +406,12 @@ impl Commander {
             LogBackendInformation::Rtt(_) => return Err("Something really wrong happened".to_string())
         };
 
-        if probe_info.rtt_stream_thread_tx.is_none() {
+        if probe_info.log_thread_control_tx.is_none() {
             let (rtt_stream_control_tx, rtt_stream_control_rx) = std::sync::mpsc::channel();
-            probe_info.rtt_stream_thread_tx = Some(rtt_stream_control_tx);
+            probe_info.log_thread_control_tx = Some(rtt_stream_control_tx);
 
             let tx = self.command_tx.clone();
+            let command_response_tx = self.command_response_tx.clone();
 
             // Actual thread
             let handle = std::thread::spawn(move || {
@@ -335,6 +423,7 @@ impl Commander {
                     .timeout(std::time::Duration::from_secs(3600))
                     .open().expect("Failed to open port");
                 info!("Serial port opened");
+                let _ = command_response_tx.send(CommandResponse::TextMessage { message: "Connected".to_string() });
 
 
                 loop {
@@ -376,11 +465,10 @@ impl Commander {
                     thread::sleep(time::Duration::from_millis(10));
                 }
             });
-            probe_info.rtt_thread_handle = Some(handle);
+            probe_info.log_thread = Some(handle);
         }
         Ok(())
     }
-
 
     /// Connect to an RTT backend
     /// 
@@ -406,14 +494,14 @@ impl Commander {
             LogBackendInformation::Uart(_,_) => return Err("Something really wrong happened".to_string())
         };
         
-        if probe_info.rtt_stream_thread_tx.is_none() {
+        if probe_info.log_thread_control_tx.is_none() {
             let (rtt_stream_control_tx, rtt_stream_control_rx) = std::sync::mpsc::channel();
-            probe_info.rtt_stream_thread_tx = Some(rtt_stream_control_tx);
+            probe_info.log_thread_control_tx = Some(rtt_stream_control_tx);
 
             let tx = self.command_tx.clone();
             info!("Converting {}", rtt_address);
 
-            let egui_ctx = self.egui_ctx.clone();
+            //let egui_ctx = self.egui_ctx.clone();
 
             let handle = std::thread::spawn(move || {
 
@@ -474,11 +562,10 @@ impl Commander {
                     }
                 }
             });
-            probe_info.rtt_thread_handle = Some(handle);
+            probe_info.log_thread = Some(handle);
         };                    
         Ok(())
     }
-
 
     /// Implementation for Command::GetProbes
     /// 
@@ -486,7 +573,7 @@ impl Commander {
     /// is later sent via a mpsc channel to the entity that queried it
     fn cmd_get_probes (&mut self) {
         // Re-initialize
-        self.init();
+        let _ = self.init();
 
         // Create output
         let return_value = CommandResponse::ProbeInformation{
@@ -504,8 +591,8 @@ impl Commander {
     fn cmd_disconnect(&mut self, probe_serial: String) -> Result<(), String> {
         let probe_info = self.probes.iter_mut().find(|target_mcu| *target_mcu.probe_info.serial_number.as_ref().unwrap() == probe_serial).ok_or("Unable to find probe")?;
 
-        let handle = probe_info.rtt_thread_handle.take().ok_or("Streaming was not active, or something really bad is happening (thread leaked)")?;
-        let channel = probe_info.rtt_stream_thread_tx.take().ok_or("Thread is running but the SPMC channel is down!")?;
+        let handle = probe_info.log_thread.take().ok_or("Streaming was not active, or something really bad is happening (thread leaked)")?;
+        let channel = probe_info.log_thread_control_tx.take().ok_or("Thread is running but the SPMC channel is down!")?;
         match channel.send(false) {
             Ok(_) => (),
             Err(e) => return Err(format!("{}", e)),
@@ -518,6 +605,7 @@ impl Commander {
         }
 
         info!("Disconnected");
+        let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: "Disconnected".to_string() });
         Ok(())
     }
 
@@ -541,7 +629,7 @@ impl Commander {
             let strtab_idx = symbol.st_name as usize;
             if strtab_idx != 0 {
                 match strtab.get(strtab_idx) {
-                    Err(e) => (),
+                    Err(_) => (),
                     Ok(symb_name) => {
                         if symb_name == "_SEGGER_RTT" {
                             return Ok(symbol.st_value);
@@ -575,13 +663,102 @@ impl Commander {
                         LogBackend::Rtt{elf_path} => LogBackendInformation::Rtt(Commander::rtt_block_from_elf(elf_path)?),
                         LogBackend::Uart{dev, baud}  => LogBackendInformation::Uart(dev.clone(), *baud),
                     },
-                    rtt_thread_handle: None,
-                    rtt_stream_thread_tx: None,
+                    log_thread: None,
+                    log_thread_control_tx: None,
                 });
             }
         }
 
         Ok(())
     }
+    
+    /// Apply filters to a log message
+    fn apply_filters(&self, log: String) -> Option<LogMessage> {
 
+        let mut log = Some(LogMessage{
+            color: style::Color::White,
+            message: log
+        });
+
+        for current_filter in &self.filters {
+            if log.is_none() {
+                return log;
+            }
+            match current_filter.kind {
+                LogFilterType::Inclusion => {
+                    let tmp_log = log.clone().unwrap();
+                    let retain_it = tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
+                    if retain_it {
+                        continue;
+                    } else {
+                        log = None;
+                    }
+                },
+                LogFilterType::Exclusion => {
+                    let tmp_log = log.clone().unwrap();
+                    let retain_it = !tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
+                    if retain_it {
+                        continue;
+                    } else {
+                        log = None;
+                    }
+                },
+                LogFilterType::Highlighter => {
+                    let tmp_log = log.clone().unwrap();
+                    let matches_msg = tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
+                    if matches_msg {
+                        log = Some(LogMessage{
+                            message: log.unwrap().message,
+                            color: current_filter.color,
+                        });
+                    }
+                }
+            }
+        }
+        log
+    }
+}
+
+
+
+pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
+    if input.is_empty() {
+        return Err(String::from("Filter information missing"));
+    }
+
+    if input.len() < 2 {
+        return Err(String::from("Wrong arguments. Expected \'/{h,i,e} {color} word\'"));
+    }
+
+    let mut idx = 0;
+
+    let kind = match input[idx].chars().next() {
+        Some('h') => LogFilterType::Highlighter,
+        Some('i') => LogFilterType::Inclusion,
+        Some('e') => LogFilterType::Exclusion,
+        _ => {
+            return Err("Wrong argument".to_owned());
+        }
+    };
+    idx = idx + 1;
+
+    // Inclusion/exclusion do not change color
+    let mut color = style::Color::Blue;
+    if input.len() == 3 {
+        match input[idx].as_str() {
+            "red" => color = style::Color::Red,
+            "green" => color = style::Color::Green,
+            "yel" => color = style::Color::Yellow,
+            _ => ()
+        }
+        idx = idx + 1;
+    }
+
+    let _ = sender.send(Command::AddFilter(LogFilter {
+        color,
+        kind,
+        msg: input[idx].clone(),
+    }));
+
+    Ok(())
 }
