@@ -2,7 +2,7 @@ use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
 
 use tracing::error;
 use tracing_subscriber::{fmt, prelude::*, Registry};
-use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
+use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
 
 use tokio::runtime::Runtime;
 use std::sync::mpsc::{Receiver, Sender};
@@ -20,6 +20,9 @@ use ratatui::crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
 
 pub struct App {
     
+    // Configuration
+    config: ApplicationConfiguration,
+
     current_screen: CurrentScreen,
     
     pub command_tx: Sender<Command>,
@@ -80,7 +83,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // Load configuration file
-    let cfg = configuration::load_configuration();
+    let cfg = configuration::load_target_cfg();
 
     // Prepare communication layer for gui-commander and commander-commander trheads
     let (commander_tx, commander_rx) = std::sync::mpsc::channel();
@@ -228,18 +231,6 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 
         // Read data
         while let Ok(message) = app.rtt_data_rx.try_recv() {
-            //info!("Received <-- {:?} -->", message);
-            
-            //  let log_message = LogMessage {
-            //      message: message[0 .. message.len() - 1].to_owned(),
-            //      color: Color32::TRANSPARENT,
-            //  };
-            //  // Store the log message
-            //  self.logs.push(log_message.clone());
-            //  // Apply filters and add it to the filtered logs list too
-            //  if let Some(filtered_log_message) = self.apply_filters(log_message) {
-            //      self.filtered_logs.push(filtered_log_message);
-            //  }
             app.section_logs.logs.push(message);
         }
     }
@@ -283,7 +274,11 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 impl App {
 
     pub fn new(command_tx: Sender<Command>, command_response_rx: Receiver<CommandResponse>, rtt_data_rx: Receiver<LogMessage>) -> App {
+
+        let app_cfg = ApplicationConfiguration::load_cfg();
+        let aliases = app_cfg.alias_list.clone();
         App {
+            config: app_cfg,
             command_tx: command_tx.clone(),
             command_response_rx,
             rtt_data_rx,
@@ -295,7 +290,7 @@ impl App {
                 targets: Vec::new(),
             },
             section_filters: SectionFilters::new(command_tx.clone()),
-            command_parser: CommandParser::new(command_tx),
+            command_parser: CommandParser::new(command_tx, aliases),
             message: String::new(),
         }
     }

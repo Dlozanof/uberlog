@@ -5,7 +5,7 @@ use elf::{endian::AnyEndian, ElfBytes};
 use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
 use ratatui::style;
 use tracing::{error, info};
-use crate::{configuration::{Configuration, LogBackend}, LogFilter, LogFilterType, LogMessage};
+use crate::{configuration::{TargetConfiguration, LogBackend}, LogFilter, LogFilterType, LogMessage};
 
 pub enum Command {
 
@@ -110,7 +110,7 @@ pub struct Commander {
     logs_raw: Vec<String>,
 
     /// Configuration
-    pub cfg: Configuration,
+    pub cfg: TargetConfiguration,
 
     /// Log streaming information
     pub stream_logs: bool,
@@ -137,7 +137,7 @@ impl Commander {
     /// 
     /// Intended to be used in the beginning of the aplication, to create the single commander that
     /// will handle all the connected probes and related targets
-    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<CommandResponse>, rtt_tx: Sender<LogMessage>, cfg: Configuration) -> Commander {
+    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<CommandResponse>, rtt_tx: Sender<LogMessage>, cfg: TargetConfiguration) -> Commander {
         let mut ret = Commander {
             probes: Vec::new(),
             filters: Vec::new(),

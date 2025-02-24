@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
 
-use crate::commander::Command;
+use crate::{commander::Command, configuration::Alias};
 
 pub enum State {
     Idle,
@@ -19,17 +19,19 @@ pub struct CommandParser {
     state: State,
     registered_instructions: Vec<Instruction>,
     command_tx: Sender<Command>,
+    aliases: Vec<Alias>,
 }
 
 impl CommandParser {
 
     /// Create a new commander
-    pub fn new(command_tx: Sender<Command>) -> CommandParser {
+    pub fn new(command_tx: Sender<Command>, aliases: Vec<Alias>) -> CommandParser {
         CommandParser {
             parsed_command: String::new(),
             state: State::Idle,
             registered_instructions: Vec::new(),
-            command_tx
+            command_tx,
+            aliases,
         }
     }
 
@@ -61,7 +63,9 @@ impl CommandParser {
 
     /// Command complete, process it
     fn execute_order_66(&mut self) {
-        let tokenized_instruction: Vec<String> = self.parsed_command.split_ascii_whitespace().map(|x| {
+
+        // Split with spaces
+        let mut tokenized_instruction: Vec<String> = self.parsed_command.split_ascii_whitespace().map(|x| {
             String::from(x.trim())
         }).collect();
 
@@ -69,11 +73,26 @@ impl CommandParser {
             return;
         }
 
+        // Identify and apply aliases
+        for alias in &self.aliases {
+            if alias.alias.eq(&tokenized_instruction[0]){
+                tokenized_instruction.remove(0);
+
+                let mut alias_token: Vec<String> = alias.expanded.split_ascii_whitespace().map(|x| String::from(x.trim())).collect();
+                alias_token.append(&mut tokenized_instruction);
+                tokenized_instruction = alias_token;
+            }
+        }
+
+        // Separate command from arguments
         let (inst, args) = tokenized_instruction.split_at(1);
-        let inst = inst.last().expect("Really bad");
+        let inst: String = inst.last().expect("Really bad").to_owned();
+
+        //let _ = self.command_tx.send(Command::PrintMessage(format!("inst: {:?}, args {:?}", inst, args)));
         
+        // Execute command
         for registered_inst in &self.registered_instructions {
-            if registered_inst.opcode.eq(inst) {
+            if registered_inst.opcode.eq(&inst) {
                 match (registered_inst.operation)(&self.command_tx, args.to_vec()) {
                     Ok(()) => (),
                     Err(e) => {
