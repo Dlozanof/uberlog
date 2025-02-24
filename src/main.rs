@@ -1,33 +1,45 @@
-use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
+use std::{fs::OpenOptions, time::Duration};
 
-use tracing::error;
-use tracing_subscriber::{fmt, prelude::*, Registry};
-use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, Command, CommandResponse, Commander}, configuration, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
+use tracing::{Level, error, info, span};
+use tracing_subscriber::{Registry, fmt, prelude::*};
+use uberlog_lib::{
+    LogMessage,
+    command_parser::CommandParser,
+    commander::{self, Command, Commander, UiCommand, add_filter},
+    configuration::{self, ApplicationConfiguration},
+    layout_section::LayoutSection,
+    tui::{
+        section_filters::SectionFilters, section_logs::SectionLogs, section_sources::SectionSources,
+    },
+};
 
-use tokio::runtime::Runtime;
 use std::sync::mpsc::{Receiver, Sender};
+use tokio::runtime::Runtime;
 
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode};
+use ratatui::crossterm::event::DisableMouseCapture;
+use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
+use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 use ratatui::{
-    layout::{Constraint, Direction, Layout}, prelude::{Backend, CrosstermBackend}, text::Line, widgets::{Block, Paragraph}, Frame, Terminal
+    Frame, Terminal,
+    layout::{Constraint, Direction, Layout},
+    prelude::{Backend, CrosstermBackend},
+    text::Line,
+    widgets::{Block, Paragraph},
 };
 use std::{error::Error, io};
-use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
-use ratatui::crossterm::event::DisableMouseCapture;
-use ratatui::crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
 
 pub struct App {
-    
     current_screen: CurrentScreen,
-    
+
     pub command_tx: Sender<Command>,
-    pub command_response_rx: Receiver<CommandResponse>,
+    pub command_response_rx: Receiver<UiCommand>,
     pub rtt_data_rx: Receiver<LogMessage>,
 
     // Top section
-    pub section_probes: SectionProbes,
+    pub section_probes: SectionSources,
     pub section_filters: SectionFilters,
 
     // Log section
@@ -45,57 +57,30 @@ pub enum CurrentScreen {
     #[default]
     Live,
     Filters,
+    Probes,
 }
-
-
-fn test_command(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
-    if input.is_empty() {
-        return Err(String::from("Mesasge not supplied"));
-    }
-
-    if input.len() > 1 {
-        return Err(String::from("Too many arguments"));
-    }
-
-    let _ = sender.send(Command::PrintMessage(input[0].clone()));
-
-    Ok(())
-}
-
-fn open_file_command(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
-    if input.is_empty() {
-        return Err(String::from("path no"));
-    }
-
-    if input.len() > 1 {
-        return Err(String::from("Too many arguments"));
-    }
-
-    let _ = sender.send(Command::OpenFile(PathBuf::from(&input[0])));
-
-    Ok(())
-}
-
 
 fn main() -> Result<(), Box<dyn Error>> {
-
     let log_file = OpenOptions::new()
-        .append(true)
+        .write(true)
+        .truncate(true)
         .create(true)
         .open("uberlog.log")
         .unwrap();
 
-    let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .with_writer(log_file)
-        )
-        .with(tracing_subscriber::filter::EnvFilter::from_default_env());
+    if std::env::var("RUST_LOG").is_err() {
+        unsafe { std::env::set_var("RUST_LOG", "info") }
+    }
 
+    let subscriber = Registry::default()
+        .with(fmt::layer().with_writer(log_file).with_ansi(false))
+        .with(tracing_subscriber::filter::EnvFilter::from_default_env());
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    info!("Starting app");
     // Load configuration file
-    let cfg = configuration::load_configuration();
+    let target_cfg = configuration::load_target_cfg();
+    let app_cfg = ApplicationConfiguration::load_cfg();
 
     // Prepare communication layer for gui-commander and commander-commander trheads
     let (commander_tx, commander_rx) = std::sync::mpsc::channel();
@@ -103,25 +88,51 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (rtt_data_tx, rtt_data_rx) = std::sync::mpsc::channel();
 
     // Instantiate application and commander
-    let mut app = App::new(commander_tx.clone(), commander_response_rx, rtt_data_rx);
-    let mut commander = Commander::new(commander_tx.clone(), commander_rx, commander_responwe_tx, rtt_data_tx, cfg);
+    let mut app = App::new(
+        commander_tx.clone(),
+        commander_response_rx,
+        rtt_data_rx,
+        &app_cfg,
+    );
+    let mut commander = Commander::new(
+        commander_tx.clone(),
+        commander_rx,
+        commander_responwe_tx,
+        rtt_data_tx,
+        target_cfg,
+        &app_cfg,
+    );
 
-    // Register commands
-    app.command_parser.register_instruction(String::from(":print"),test_command);
-    app.command_parser.register_instruction(String::from(":open"),open_file_command);
-    app.command_parser.register_instruction(String::from(":filter"),add_filter);
-    
+    // Register commands -- File
+    app.command_parser
+        .register_instruction(String::from(":stream"), commander::stream_file);
+    app.command_parser
+        .register_instruction(String::from(":sstart"), commander::stream_start);
+    app.command_parser
+        .register_instruction(String::from(":sstop"), commander::stream_stop);
+    // Register commands -- Internal
+    app.command_parser
+        .register_instruction(String::from(":find"), commander::find_log);
+    // Register commands -- Filter
+    app.command_parser
+        .register_instruction(String::from(":filter"), commander::add_filter);
+
     // Commander main loop
     let rt = Runtime::new().expect("Unable to create Runtime");
     let _enter = rt.enter();
     std::thread::spawn(move || {
         rt.block_on(async {
-            // Hack-ish: send a probe update command
-            let _ = commander_tx.send(Command::GetProbes);
             loop {
+                let _span = span!(Level::DEBUG, "Commander cmd process").entered();
                 match commander.process() {
                     Ok(_) => (),
-                    Err(e) => error!("{}", e),
+                    Err(e) => {
+                        error!("Commander error: {}", e);
+                        let _ = commander.command_response_tx.send(UiCommand::TextMessage {
+                            message: "Internal error".to_string(),
+                        });
+                        break;
+                    }
                 }
             }
         });
@@ -129,9 +140,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // setup terminal
     enable_raw_mode()?;
-    let mut stderr = io::stderr(); // This is a special case. Normally using stdout is fine
-    execute!(stderr, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stderr);
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+
+    // create the backend/terminal
+    let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // run it
@@ -153,17 +166,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<bool> {
     loop {
         // TODO: Try to fix this
         //app.section_logs.vertical_scroll_state = app.section_logs.vertical_scroll_state.content_length(app.section_logs.logs.len());
-        
+
         terminal.draw(|f| ui(f, app))?;
 
         if event::poll(Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
-
                 // Skip events that are not KeyEventKind::Press
                 if key.kind == event::KeyEventKind::Release {
                     continue;
@@ -172,31 +183,33 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                 // If command parser is processing a command, append char and skip further processing
                 if !app.command_parser.is_idle() {
                     app.command_parser.process_key(key.code);
-                }
-                else {
+                } else {
                     match app.current_screen {
                         CurrentScreen::Live => {
                             match key.code {
                                 // Only exit the application from `Live` screen
-                                KeyCode::Char('q') => {
-                                    return Ok(true)
-                                },
-
-                                // So far only process comands in `Live` screen
-                                KeyCode::Char(':') | KeyCode::Char('/') => {
-                                    app.message.clear();
-                                    app.command_parser.process_key(key.code);
-                                },
+                                KeyCode::Char('q') => return Ok(true),
 
                                 // Switch to Filter view
                                 KeyCode::Char('F') => {
                                     let _ = app.command_tx.send(Command::GetFilters);
                                     app.current_screen = CurrentScreen::Filters;
-                                },
+                                }
+
+                                // Switch to Probe view
+                                KeyCode::Char('P') => {
+                                    let _ = app.command_tx.send(Command::RefreshProbeInfo);
+                                    app.current_screen = CurrentScreen::Probes;
+                                }
+
+                                // So far only process comands in `Live` screen
+                                KeyCode::Char(':') | KeyCode::Char('/') => {
+                                    app.message.clear();
+                                    app.command_parser.process_key(key.code);
+                                }
 
                                 // Otherwise forward to sub-views
                                 key => {
-                                    app.section_probes.process_key(key);
                                     app.section_logs.process_key(key);
                                 }
                             }
@@ -206,77 +219,103 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                 // Only exit the application from `Live` screen
                                 KeyCode::Char('q') | KeyCode::Esc => {
                                     app.current_screen = CurrentScreen::Live;
-                                },
+                                }
+
+                                // Switch to Probe view
+                                KeyCode::Char('P') => {
+                                    let _ = app.command_tx.send(Command::RefreshProbeInfo);
+                                    app.current_screen = CurrentScreen::Probes;
+                                }
+
                                 // Otherwise forward to sub-views
                                 key => {
                                     app.section_filters.process_key(key);
                                 }
                             }
                         }
-                    } 
+                        CurrentScreen::Probes => {
+                            match key.code {
+                                // Only exit the application from `Live` screen
+                                KeyCode::Char('q') | KeyCode::Esc => {
+                                    app.current_screen = CurrentScreen::Live;
+                                }
+
+                                // Switch to Filter view
+                                KeyCode::Char('F') => {
+                                    let _ = app.command_tx.send(Command::GetFilters);
+                                    app.current_screen = CurrentScreen::Filters;
+                                }
+
+                                // Otherwise forward to sub-views
+                                key => {
+                                    app.section_probes.process_key(key);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-        
+
         // Check for command responses
         if let Ok(response) = app.command_response_rx.try_recv() {
+            info!("Ui Processing {}", response);
             match response {
-                CommandResponse::ProbeInformation { probes } => {
-                    app.section_probes.targets = probes;
-                },
-                CommandResponse::TextMessage { message } => {
+                UiCommand::TextMessage { message } => {
                     app.command_parser.cancel_parsing();
                     app.message = message;
-                },
-                CommandResponse::UpdateFilterList(filters) => {
+                }
+                UiCommand::UpdateFilterList(filters) => {
                     app.section_filters.set_filters(filters);
                 }
-                CommandResponse::UpdateLogs(logs) => {
+                UiCommand::UpdateLogs(logs) => {
                     app.section_logs.update_logs(logs);
                 }
-                _ => ()
+                UiCommand::UpdateSearchLog(log) => {
+                    app.section_logs.update_search_log(log);
+                }
+                UiCommand::AddNewSource(id, display_text) => {
+                    app.section_probes.add_source(id, display_text);
+                }
+                UiCommand::SetConnectionSource(id, is_connected) => {
+                    app.section_probes.set_connected(id, is_connected);
+                }
+                UiCommand::RemoveSource(id) => {
+                    app.section_probes.delete_source(id);
+                }
             }
         }
 
         // Read data
         while let Ok(message) = app.rtt_data_rx.try_recv() {
-            //info!("Received <-- {:?} -->", message);
-            
-            //  let log_message = LogMessage {
-            //      message: message[0 .. message.len() - 1].to_owned(),
-            //      color: Color32::TRANSPARENT,
-            //  };
-            //  // Store the log message
-            //  self.logs.push(log_message.clone());
-            //  // Apply filters and add it to the filtered logs list too
-            //  if let Some(filtered_log_message) = self.apply_filters(log_message) {
-            //      self.filtered_logs.push(filtered_log_message);
-            //  }
-            app.section_logs.logs.push(message);
+            app.section_logs.append_log(message);
         }
     }
 }
 
 pub fn ui(frame: &mut Frame, app: &mut App) {
-
+    // Depending on the current view allocate some lines on top
     let top_side_lines = match app.current_screen {
-        CurrentScreen::Live => app.section_probes.min_lines(),
+        CurrentScreen::Live => 0,
         CurrentScreen::Filters => app.section_filters.min_lines(),
+        CurrentScreen::Probes => app.section_probes.min_lines(),
     };
-    
+
+    // Prepare chunks
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(top_side_lines as u16), // Probes
-            Constraint::Min(1),    // Logs
-            Constraint::Length(1), // Modal editor
+            Constraint::Min(1),                        // Logs
+            Constraint::Length(1),                     // Modal editor
         ])
         .split(frame.area());
 
-    // Print either Probes or Filters depending on the current screen
+    // If a view other than Live is selected, show it
     match app.current_screen {
-        CurrentScreen::Live => app.section_probes.ui(frame, chunks[0]),
+        CurrentScreen::Probes => app.section_probes.ui(frame, chunks[0]),
         CurrentScreen::Filters => app.section_filters.ui(frame, chunks[0]),
+        CurrentScreen::Live => (),
     }
 
     // Show Logs section
@@ -287,29 +326,28 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
         true => app.message.clone(),
         false => app.command_parser.get_parsed_cmd(),
     };
-    let status_line = Paragraph::new(Line::from(text_to_print))
-        .block(Block::default());
+    let status_line = Paragraph::new(Line::from(text_to_print)).block(Block::default());
     frame.render_widget(status_line, chunks[2]);
 }
 
 impl App {
-
-    pub fn new(command_tx: Sender<Command>, command_response_rx: Receiver<CommandResponse>, rtt_data_rx: Receiver<LogMessage>) -> App {
+    pub fn new(
+        command_tx: Sender<Command>,
+        command_response_rx: Receiver<UiCommand>,
+        rtt_data_rx: Receiver<LogMessage>,
+        cfg: &ApplicationConfiguration,
+    ) -> App {
+        let aliases = cfg.alias_list.clone();
         App {
             command_tx: command_tx.clone(),
             command_response_rx,
             rtt_data_rx,
             current_screen: CurrentScreen::Live,
             section_logs: SectionLogs::new(command_tx.clone()),
-            section_probes: SectionProbes {
-                command_tx: command_tx.clone(),
-                selected_probe: 0,
-                targets: Vec::new(),
-            },
+            section_probes: SectionSources::new(command_tx.clone()),
             section_filters: SectionFilters::new(command_tx.clone()),
-            command_parser: CommandParser::new(command_tx),
+            command_parser: CommandParser::new(command_tx, aliases),
             message: String::new(),
         }
     }
-
 }

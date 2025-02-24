@@ -1,9 +1,8 @@
 [package]
 name = "uberlog"
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+edition = "2024"
 
 [lib]
 path = "src/lib.rs"
@@ -28,3 +27,4 @@ strip-ansi-escapes = "0.2.0"
 tokio = { version = "1.41.0", features = ["rt", "rt-multi-thread", "time"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+ansi-to-tui = "7.0.0"

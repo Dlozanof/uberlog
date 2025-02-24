@@ -1,0 +1,31 @@
+2025-04-19T08:14:01Z    system     INFO     System boot initiated
+2025-04-19T08:14:01Z    gpio       DEBUG    GPIO pin 17 set to OUTPUT
+2025-04-19T08:14:01Z    i2c        INFO     I2C bus initialized at 400kHz
+2025-04-19T08:14:02Z    sensor     WARN     Temperature sensor reading out of expected range
+2025-04-19T08:14:02Z    adc        DEBUG    ADC channel 3 read value: 1023
+2025-04-19T08:14:03Z    spi        INFO     SPI transaction completed with device 0x2F
+2025-04-19T08:14:03Z    watchdog   INFO     Watchdog timer reset
+2025-04-19T08:14:04Z    system     INFO     Entering low-power mode
+2025-04-19T08:14:05Z    irq        DEBUG    External interrupt on pin 5 triggered
+2025-04-19T08:14:06Z    rtc        INFO     RTC alarm triggered, waking system
+2025-04-19T08:14:06Z    system     INFO     System resumed from low-power mode
+2025-04-19T08:14:06Z    flash      INFO     EEPROM config loaded successfully
+2025-04-19T08:14:07Z    uart       DEBUG    UART buffer flushed
+2025-04-19T08:14:07Z    sensor     INFO     Humidity sensor initialized
+2025-04-19T08:14:08Z    adc        DEBUG    ADC channel 1 read value: 337
+2025-04-19T08:14:08Z    i2c        ERROR    I2C NACK received from device 0x1A
+2025-04-19T08:14:09Z    system     WARN     Voltage level low: 3.1V
+2025-04-19T08:14:10Z    spi        INFO     SPI device 0x2F responded with status OK
+2025-04-19T08:14:11Z    sensor     DEBUG    Temperature: 24.3C, Humidity: 56.7%
+2025-04-19T08:14:12Z    rtc        DEBUG    Next alarm set for 08:44:00Z
+2025-04-19T08:14:13Z    watchdog   INFO     Watchdog timer reset
+2025-04-19T08:14:14Z    pwm        DEBUG    PWM duty cycle updated to 75%
+2025-04-19T08:14:14Z    system     INFO     Running health check sequence
+2025-04-19T08:14:15Z    sensor     INFO     All sensor diagnostics passed
+2025-04-19T08:14:16Z    adc        DEBUG    ADC channel 0 read value: 678
+2025-04-19T08:14:17Z    ble        INFO     BLE stack initialized
+2025-04-19T08:14:18Z    ble        DEBUG    Advertising started on channel 37
+2025-04-19T08:14:19Z    ble        INFO     Connection established with device A1:B2:C3:D4:E5:F6
+2025-04-19T08:14:20Z    flash      WARN     Write operation took longer than expected
+2025-04-19T08:14:21Z    system     INFO     System idle - waiting for event
+
