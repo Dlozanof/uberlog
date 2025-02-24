@@ -18,10 +18,14 @@ pub struct SectionLogs {
 impl SectionLogs {
     pub fn clear_logs(&mut self) {
         self.logs.clear();
+        self.vertical_scroll = 0;
     }
 
     pub fn update_logs(&mut self, new_logs: Vec<LogMessage>) {
         self.logs = new_logs;
+        if self.vertical_scroll > self.logs.len() {
+            self.vertical_scroll = self.vertical_scroll_limit;
+        }
     }
 }
 
