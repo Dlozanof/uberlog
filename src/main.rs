@@ -2,7 +2,7 @@ use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
 
 use tracing::error;
 use tracing_subscriber::{fmt, prelude::*, Registry};
-use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, Command, CommandResponse, Commander}, configuration, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
+use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
 
 use tokio::runtime::Runtime;
 use std::sync::mpsc::{Receiver, Sender};
@@ -45,21 +45,6 @@ pub enum CurrentScreen {
     #[default]
     Live,
     Filters,
-}
-
-
-fn test_command(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
-    if input.is_empty() {
-        return Err(String::from("Mesasge not supplied"));
-    }
-
-    if input.len() > 1 {
-        return Err(String::from("Too many arguments"));
-    }
-
-    let _ = sender.send(Command::PrintMessage(input[0].clone()));
-
-    Ok(())
 }
 
 fn open_file_command(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
@@ -106,9 +91,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new(commander_tx.clone(), commander_response_rx, rtt_data_rx);
     let mut commander = Commander::new(commander_tx.clone(), commander_rx, commander_responwe_tx, rtt_data_tx, cfg);
 
-    // Register commands
-    app.command_parser.register_instruction(String::from(":print"),test_command);
+    // Register commands -- File
     app.command_parser.register_instruction(String::from(":open"),open_file_command);
+    app.command_parser.register_instruction(String::from(":sstart"), stream_start);
+    app.command_parser.register_instruction(String::from(":ssend"), stream_stop);
+
+    // Register commands -- Filter
     app.command_parser.register_instruction(String::from(":filter"),add_filter);
     
     // Commander main loop

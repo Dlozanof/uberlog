@@ -11,13 +11,13 @@ pub enum Command {
 
     // File
     OpenFile(std::path::PathBuf),
+    StreamLogs(bool, String),
 
     // Probes
     GetProbes,
     Connect(TargetInformation),
     Disconnect(String),
     Reset(String),
-    StreamLogs(bool, String),
     ParseLogBytes(Vec<u8>),
 
     // Misc
@@ -187,9 +187,13 @@ impl Commander {
             }
 
             // Otherwise open file
-            if let Ok(p) = std::fs::File::create(path) {
+            if let Ok(mut p) = std::fs::File::create(&path) {
+                for line in &self.logs_raw {
+                    let _ = p.write_all(line.as_bytes());
+                }
                 self.stream_logs_file_handle = Some(p);
                 self.stream_logs = true;
+                let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: format!("Saved/streaming data into <{}>", path) });
             }
         } else {
             // Make sure we were not -not- streaming already
@@ -201,6 +205,8 @@ impl Commander {
             // Otherwise close file
             self.stream_logs_file_handle = None;
             self.stream_logs = false;
+
+            let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: "Streaming stopped".to_string() });
         }
         
         Ok(())
@@ -719,8 +725,15 @@ impl Commander {
     }
 }
 
-
-
+/// Add filter callback
+/// 
+/// Add a filter by parsing the `input` field. It has the general form:
+/// {h/i/e} (optional)color word
+/// 
+/// Examples:
+///     h red wrn -> add highlight filter (color red) for lines containing "wrn"
+///     i tempo -> add inclusion filter for lines containing "tempo"
+///     e tempo -> add exclusion filter for lines containing "tempo"
 pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
     if input.is_empty() {
         return Err(String::from("Filter information missing"));
@@ -760,5 +773,23 @@ pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), St
         msg: input[idx].clone(),
     }));
 
+    Ok(())
+}
+
+/// Start streaming into a file
+pub fn stream_start(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
+    if input.len() != 1 {
+        return Err(String::from("Wrong arguments, expected just the path"));
+    }
+    let _ = sender.send(Command::StreamLogs(true, input[0].clone()));
+    Ok(())
+}
+
+/// Stop streaming into a file
+pub fn stream_stop(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
+    if input.len() != 0 {
+        return Err(String::from("Too many arguments"));
+    }
+    let _ = sender.send(Command::StreamLogs(false, String::new()));
     Ok(())
 }
