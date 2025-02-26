@@ -682,7 +682,7 @@ impl Commander {
     fn apply_filters(&self, log: String) -> Option<LogMessage> {
 
         let mut log = Some(LogMessage{
-            color: style::Color::White,
+            color: style::Color::DarkGray,
             message: log
         });
 
@@ -761,7 +761,10 @@ pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), St
         match input[idx].as_str() {
             "red" => color = style::Color::Red,
             "green" => color = style::Color::Green,
-            "yel" => color = style::Color::Yellow,
+            "yellow" => color = style::Color::Yellow,
+            "white" => color = style::Color::White,
+            "blue" => color = style::Color::Blue,
+            "magenta" => color = style::Color::Magenta,
             _ => ()
         }
         idx = idx + 1;
