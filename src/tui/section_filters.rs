@@ -82,6 +82,10 @@ impl LayoutSection for SectionFilters {
                 self.selected_filter = 0;
             }
             KeyCode::End => {
+                // Make sure there is a filter
+                if self.filters.is_empty() {
+                    return;
+                }
                 self.selected_filter = self.filters.len() - 1;
             }
             KeyCode::Char('d') => {
