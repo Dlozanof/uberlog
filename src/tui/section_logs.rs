@@ -23,9 +23,7 @@ impl SectionLogs {
 
     pub fn update_logs(&mut self, new_logs: Vec<LogMessage>) {
         self.logs = new_logs;
-        if self.vertical_scroll > self.logs.len() {
-            self.vertical_scroll = self.vertical_scroll_limit;
-        }
+        self.vertical_scroll = 0;
     }
 }
 
