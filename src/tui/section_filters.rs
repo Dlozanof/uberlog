@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::{self, Style}, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
+use ratatui::{layout::Rect, style::{self, Modifier, Style}, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
 
 use crate::{commander::Command, layout_section::LayoutSection, LogFilter, LogFilterType};
 
@@ -38,18 +38,10 @@ impl LayoutSection for SectionFilters {
                 LogFilterType::Highlighter => "Highlight",
             };
 
-            let line_style = Style {
-                fg: match filter.kind {
-                    LogFilterType::Exclusion => Some(style::Color::default()),
-                    LogFilterType::Inclusion => Some(style::Color::default()),
-                    LogFilterType::Highlighter => Some(filter.color),
-                },
-                bg: match idx == self.selected_filter {
-                    true => Some(style::Color::DarkGray),
-                    false => Some(style::Color::default()),
-                },
-                ..Default::default()
-            };
+            let mut line_style = filter.style;
+            if idx == self.selected_filter {
+                line_style = line_style.add_modifier(Modifier::BOLD);
+            }
 
             // Print the line
             filter_list_lines.push(Line::from(format!("[{}] {} <{}>", idx, type_text, filter.msg)).style(line_style));

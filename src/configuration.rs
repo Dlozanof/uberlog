@@ -36,7 +36,10 @@ pub struct Alias {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ApplicationConfiguration {
-   // aliases
+   /// Default color for non filtered data
+
+   
+   /// Alias list
    pub alias_list: Vec<Alias>
 }
 
@@ -46,7 +49,7 @@ impl ApplicationConfiguration {
          alias_list: vec![
             Alias {
                alias:    String::from(":fy"),
-               expanded: String::from(":filter h yel"),
+               expanded: String::from(":filter h yellow"),
             },
             Alias {
                alias:    String::from(":fr"),
@@ -59,7 +62,11 @@ impl ApplicationConfiguration {
             Alias {
                alias:    String::from(":fi"),
                expanded: String::from(":filter i"),
-            }
+            },
+            Alias {
+               alias:    String::from(":fh"),
+               expanded: String::from(":filter h"),
+            },
          ]
       }
    }

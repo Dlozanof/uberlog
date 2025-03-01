@@ -83,16 +83,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // Load configuration file
-    let cfg = configuration::load_target_cfg();
+    let target_cfg = configuration::load_target_cfg();
+    let app_cfg = ApplicationConfiguration::load_cfg();
 
     // Prepare communication layer for gui-commander and commander-commander trheads
     let (commander_tx, commander_rx) = std::sync::mpsc::channel();
     let (commander_responwe_tx, commander_response_rx) = std::sync::mpsc::channel();
     let (rtt_data_tx, rtt_data_rx) = std::sync::mpsc::channel();
 
+
+
     // Instantiate application and commander
-    let mut app = App::new(commander_tx.clone(), commander_response_rx, rtt_data_rx);
-    let mut commander = Commander::new(commander_tx.clone(), commander_rx, commander_responwe_tx, rtt_data_tx, cfg);
+    let mut app = App::new(commander_tx.clone(), commander_response_rx, rtt_data_rx, &app_cfg);
+    let mut commander = Commander::new(commander_tx.clone(), commander_rx, commander_responwe_tx, rtt_data_tx, target_cfg, &app_cfg);
 
     // Register commands -- File
     app.command_parser.register_instruction(String::from(":open"),open_file_command);
@@ -273,12 +276,11 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
 impl App {
 
-    pub fn new(command_tx: Sender<Command>, command_response_rx: Receiver<CommandResponse>, rtt_data_rx: Receiver<LogMessage>) -> App {
+    pub fn new(command_tx: Sender<Command>, command_response_rx: Receiver<CommandResponse>, rtt_data_rx: Receiver<LogMessage>, cfg: &ApplicationConfiguration) -> App {
 
-        let app_cfg = ApplicationConfiguration::load_cfg();
-        let aliases = app_cfg.alias_list.clone();
+        let aliases = cfg.alias_list.clone();
         App {
-            config: app_cfg,
+            config: cfg.clone(),
             command_tx: command_tx.clone(),
             command_response_rx,
             rtt_data_rx,

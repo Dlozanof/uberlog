@@ -3,9 +3,9 @@ use std::{fs::read_to_string, io::Write, path::PathBuf, sync::mpsc::{Receiver, S
 
 use elf::{endian::AnyEndian, ElfBytes};
 use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
-use ratatui::style;
+use ratatui::style::{self, Modifier, Style};
 use tracing::{error, info};
-use crate::{configuration::{TargetConfiguration, LogBackend}, LogFilter, LogFilterType, LogMessage};
+use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, LogFilter, LogFilterType, LogMessage};
 
 pub enum Command {
 
@@ -110,7 +110,8 @@ pub struct Commander {
     logs_raw: Vec<String>,
 
     /// Configuration
-    pub cfg: TargetConfiguration,
+    pub target_cfg: TargetConfiguration,
+    pub app_cfg: ApplicationConfiguration,
 
     /// Log streaming information
     pub stream_logs: bool,
@@ -137,12 +138,13 @@ impl Commander {
     /// 
     /// Intended to be used in the beginning of the aplication, to create the single commander that
     /// will handle all the connected probes and related targets
-    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<CommandResponse>, rtt_tx: Sender<LogMessage>, cfg: TargetConfiguration) -> Commander {
+    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<CommandResponse>, rtt_tx: Sender<LogMessage>, cfg: TargetConfiguration, app_cfg: &ApplicationConfiguration) -> Commander {
         let mut ret = Commander {
             probes: Vec::new(),
             filters: Vec::new(),
             logs_raw: Vec::new(),
-            cfg,
+            target_cfg: cfg,
+            app_cfg: app_cfg.clone(),
             command_rx,
             command_tx,
             command_response_tx,
@@ -659,7 +661,7 @@ impl Commander {
         for probe in lister.list_all() {
             info!("Matching {:?}", probe);
 
-            if let Some(target) = self.cfg.targets.iter().filter(|t| t.probe_id == *probe.serial_number.as_ref().unwrap()).next() {
+            if let Some(target) = self.target_cfg.targets.iter().filter(|t| t.probe_id == *probe.serial_number.as_ref().unwrap()).next() {
                 
             self.probes.push(TargetMcu {
                     name: target.name.clone(),
@@ -682,7 +684,7 @@ impl Commander {
     fn apply_filters(&self, log: String) -> Option<LogMessage> {
 
         let mut log = Some(LogMessage{
-            color: style::Color::DarkGray,
+            style: Style::default().add_modifier(Modifier::DIM),
             message: log
         });
 
@@ -715,7 +717,7 @@ impl Commander {
                     if matches_msg {
                         log = Some(LogMessage{
                             message: log.unwrap().message,
-                            color: current_filter.color,
+                            style: current_filter.style,
                         });
                     }
                 }
@@ -770,8 +772,13 @@ pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), St
         idx = idx + 1;
     }
 
+    let filter_style = Style {
+        fg: Some(color),
+        ..Default::default()
+    };
+
     let _ = sender.send(Command::AddFilter(LogFilter {
-        color,
+        style: filter_style,
         kind,
         msg: input[idx].clone(),
     }));

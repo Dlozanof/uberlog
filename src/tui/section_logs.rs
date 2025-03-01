@@ -23,7 +23,6 @@ impl SectionLogs {
 
     pub fn update_logs(&mut self, new_logs: Vec<LogMessage>) {
         self.logs = new_logs;
-        self.vertical_scroll = 0;
     }
 }
 
@@ -43,10 +42,9 @@ impl SectionLogs {
 impl LayoutSection for SectionLogs {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
 
-        // Update scroll limit value
-        //self.vertical_scroll_state = self.vertical_scroll_state.content_length(self.logs.len());
+        // Update scroll limit value (+2 to take into account borders)
         if area.height as usize <= self.logs.len() {
-            self.vertical_scroll_limit = self.logs.len() - area.height as usize;
+            self.vertical_scroll_limit = 2 + self.logs.len() - area.height as usize;
         } else {
             self.vertical_scroll_limit = 0
         }
@@ -64,7 +62,7 @@ impl LayoutSection for SectionLogs {
         // Draw ui
         let mut log_lines = Vec::new();
         for log in &self.logs {
-            log_lines.push(Line::from(log.message.clone()).style(log.color));
+            log_lines.push(Line::from(log.message.clone()).style(log.style));
         }
         let log_block_title = Line::from("Logs");
         let log_block = Block::default()
@@ -74,48 +72,26 @@ impl LayoutSection for SectionLogs {
         let log_content  = Paragraph::new(log_lines).block(log_block)
             .scroll((self.vertical_scroll as u16, 0));
 
-
         // Render
         frame.render_widget(log_content, area);
-        //frame.render_stateful_widget(
-        //    Scrollbar::new(ScrollbarOrientation::VerticalRight)
-        //        .begin_symbol(Some("↑"))
-        //        .end_symbol(Some("↓")),
-        //    area,
-        //    &mut self.vertical_scroll_state,
-        //);
+
     }
 
     fn process_key(&mut self, key: crossterm::event::KeyCode) {
         match key {
             KeyCode::Char('j') | KeyCode::Down => {
-                //self.vertical_scroll_state.scroll(ScrollDirection::Forward);
                 self.vertical_scroll = self.vertical_scroll.saturating_add(1).min(self.vertical_scroll_limit);
-                // self.vertical_scroll = self.vertical_scroll.saturating_add(1);
-                // self.vertical_scroll_state =
-                // self.vertical_scroll_state.position(self.vertical_scroll);
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                //self.vertical_scroll_state.scroll(ScrollDirection::Backward);
                 self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
                 self.sticky = false;
-                //self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
-                //self.vertical_scroll_state =
-                //    self.vertical_scroll_state.position(self.vertical_scroll);
             }
             KeyCode::Home => {
-                //self.vertical_scroll_state.first();
                 self.vertical_scroll = 0;
                 self.sticky = false;
-                //self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
-                //self.vertical_scroll_state =
-                //    self.vertical_scroll_state.position(self.vertical_scroll);
             }
             KeyCode::PageDown => {
                 self.vertical_scroll = self.vertical_scroll.saturating_add(self.page_size).min(self.vertical_scroll_limit);
-                //self.vertical_scroll = self.vertical_scroll.saturating_add(10);
-                //self.vertical_scroll_state =
-                //    self.vertical_scroll_state.position(self.vertical_scroll);
             }
             KeyCode::End => {
                 self.vertical_scroll = self.vertical_scroll.saturating_add(self.vertical_scroll_limit).min(self.vertical_scroll_limit);
@@ -123,9 +99,6 @@ impl LayoutSection for SectionLogs {
             KeyCode::PageUp => {
                 self.vertical_scroll = self.vertical_scroll.saturating_sub(self.page_size);
                 self.sticky = false;
-                //self.vertical_scroll = self.vertical_scroll.saturating_sub(10);
-                //self.vertical_scroll_state =
-                //    self.vertical_scroll_state.position(self.vertical_scroll);
             }
             KeyCode::Char('C') => {
                 let _ = self.command_tx.send(Command::ClearLogs);

@@ -1,4 +1,4 @@
-use ratatui::style;
+use ratatui::style::{self, Style};
 
 pub mod tui;
 pub mod commander;
@@ -9,7 +9,7 @@ pub mod command_parser;
 #[derive(Clone)]
 pub struct LogMessage {
     pub message: String,
-    pub color: style::Color,
+    pub style: Style,
 }
 
 
@@ -24,5 +24,5 @@ pub enum LogFilterType {
 pub struct LogFilter {
     pub kind: LogFilterType,
     pub msg: String,
-    pub color: style::Color,
+    pub style: Style,
 }
