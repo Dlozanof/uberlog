@@ -2,7 +2,7 @@ use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
 
 use tracing::error;
 use tracing_subscriber::{fmt, prelude::*, Registry};
-use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
+use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, find_log, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
 
 use tokio::runtime::Runtime;
 use std::sync::mpsc::{Receiver, Sender};
@@ -100,7 +100,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Register commands -- File
     app.command_parser.register_instruction(String::from(":open"),open_file_command);
     app.command_parser.register_instruction(String::from(":sstart"), stream_start);
-    app.command_parser.register_instruction(String::from(":ssend"), stream_stop);
+    app.command_parser.register_instruction(String::from(":sstop"), stream_stop);
+    app.command_parser.register_instruction(String::from(":find"), find_log);
 
     // Register commands -- Filter
     app.command_parser.register_instruction(String::from(":filter"),add_filter);
@@ -228,7 +229,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                 CommandResponse::UpdateLogs(logs) => {
                     app.section_logs.update_logs(logs);
                 }
-                _ => ()
+                CommandResponse::UpdateSearchLog(log) => {
+                    app.section_logs.update_search_log(log);
+                }
             }
         }
 

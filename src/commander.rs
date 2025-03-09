@@ -7,6 +7,39 @@ use ratatui::style::{self, Modifier, Style};
 use tracing::{error, info};
 use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, LogFilter, LogFilterType, LogMessage};
 
+
+pub struct Commander {
+
+    /// Connected target information
+    pub probes: Vec<TargetMcu>,
+
+    /// Log filtering feature
+    filters: Vec<LogFilter>,
+    logs_raw: Vec<String>,
+
+    /// Configuration
+    pub target_cfg: TargetConfiguration,
+    pub app_cfg: ApplicationConfiguration,
+
+    /// Log streaming information
+    pub stream_logs: bool,
+    pub stream_logs_file_handle: Option<std::fs::File>,
+
+    // Temporary log storage
+    pub log_raw: Vec<u8>,
+
+    /// Command input
+    pub command_rx: Receiver<Command>,
+    /// Command output (provided to thread creates by Commander)
+    pub command_tx: Sender<Command>,
+
+    /// Command response output (to send response to other modules)
+    pub command_response_tx: Sender<CommandResponse>,
+
+    // Store the rtt_tx channel for cloning purposes, will not use it directly
+    pub rtt_tx: Sender<LogMessage>
+}
+
 pub enum Command {
 
     // File
@@ -30,6 +63,7 @@ pub enum Command {
 
     // Logs
     ClearLogs,
+    FindLog(String),
 }
 
 
@@ -37,10 +71,12 @@ pub enum CommandResponse {
     TextMessage{message: String},
     ProbeInformation{probes: Vec<TargetInformation>},
 
-    // Filters
-    ClearFilters,
+    /// Filters
     UpdateFilterList(Vec<LogFilter>),
     UpdateLogs(Vec<LogMessage>),
+
+    /// Log search
+    UpdateSearchLog(String),
 }
 
 
@@ -100,37 +136,7 @@ pub struct TargetMcu {
     pub log_thread_control_tx: Option<Sender<bool>>,
 }
 
-pub struct Commander {
 
-    /// Connected target information
-    pub probes: Vec<TargetMcu>,
-
-    /// Log filtering feature
-    filters: Vec<LogFilter>,
-    logs_raw: Vec<String>,
-
-    /// Configuration
-    pub target_cfg: TargetConfiguration,
-    pub app_cfg: ApplicationConfiguration,
-
-    /// Log streaming information
-    pub stream_logs: bool,
-    pub stream_logs_file_handle: Option<std::fs::File>,
-
-    // Temporary log storage
-    pub log_raw: Vec<u8>,
-
-    /// Command input
-    pub command_rx: Receiver<Command>,
-    /// Command output (provided to thread creates by Commander)
-    pub command_tx: Sender<Command>,
-
-    /// Command response output (to send response to other modules)
-    pub command_response_tx: Sender<CommandResponse>,
-
-    // Store the rtt_tx channel for cloning purposes, will not use it directly
-    pub rtt_tx: Sender<LogMessage>
-}
 
 
 impl Commander {
@@ -257,8 +263,17 @@ impl Commander {
                 Command::ClearLogs => {
                     return self.clear_logs();
                 }
+                Command::FindLog(log) => {
+                    return self.update_log_search(log);
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Change the log being searched for
+    fn update_log_search(&self, log: String) -> Result<(), String> {
+        let _ = self.command_response_tx.send(CommandResponse::UpdateSearchLog(log));
         Ok(())
     }
 
@@ -801,5 +816,14 @@ pub fn stream_stop(sender: &Sender<Command>, input: Vec<String>) -> Result<(), S
         return Err(String::from("Too many arguments"));
     }
     let _ = sender.send(Command::StreamLogs(false, String::new()));
+    Ok(())
+}
+
+/// Stop streaming into a file
+pub fn find_log(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
+    if input.len() != 1 {
+        return Err(String::from("Nothing to search for"));
+    }
+    let _ = sender.send(Command::FindLog(input[0].clone()));
     Ok(())
 }

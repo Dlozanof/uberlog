@@ -64,6 +64,9 @@ impl CommandParser {
     /// Command complete, process it
     fn execute_order_66(&mut self) {
 
+        // Handle special case of `/` for search
+        self.parsed_command = self.parsed_command.replacen("/", ":find ", 1);
+
         // Split with spaces
         let mut tokenized_instruction: Vec<String> = self.parsed_command.split_ascii_whitespace().map(|x| {
             String::from(x.trim())
