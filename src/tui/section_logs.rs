@@ -56,6 +56,11 @@ impl SectionLogs {
     /// If the search_string is empty, the search is disabled
     fn find_log(&mut self, log: String, direction: SearchDirection) {
 
+        // If search_string_log_idx is not within view, update it
+        if self.search_string_log_idx < self.vertical_scroll || self.search_string_log_idx > (self.vertical_scroll + self.page_size) {
+            self.search_string_log_idx = self.vertical_scroll;
+        }
+
         let start_idx = match direction{
             SearchDirection::FOWARD => self.search_string_log_idx.saturating_add(1).min(self.logs.len() - 1),
             SearchDirection::BACKWARD => self.search_string_log_idx.saturating_sub(1),
