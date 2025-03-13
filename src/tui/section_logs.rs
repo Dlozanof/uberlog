@@ -56,11 +56,6 @@ impl SectionLogs {
     /// If the search_string is empty, the search is disabled
     fn find_log(&mut self, log: String, direction: SearchDirection) {
 
-
-
-
-
-
         let start_idx = match direction{
             SearchDirection::FOWARD => self.search_string_log_idx.saturating_add(1).min(self.logs.len() - 1),
             SearchDirection::BACKWARD => self.search_string_log_idx.saturating_sub(1),
@@ -175,14 +170,14 @@ impl LayoutSection for SectionLogs {
                 self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
                 self.sticky = false;
             }
-            KeyCode::Home => {
+            KeyCode::Home | KeyCode::Char('g') => {
                 self.vertical_scroll = 0;
                 self.sticky = false;
             }
             KeyCode::PageDown => {
                 self.vertical_scroll = self.vertical_scroll.saturating_add(self.page_size).min(self.vertical_scroll_limit);
             }
-            KeyCode::End => {
+            KeyCode::End | KeyCode::Char('G') => {
                 self.vertical_scroll = self.vertical_scroll.saturating_add(self.vertical_scroll_limit).min(self.vertical_scroll_limit);
             }
             KeyCode::PageUp => {
