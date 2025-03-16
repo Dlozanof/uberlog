@@ -4,7 +4,7 @@ use std::{fs::read_to_string, io::Write, path::PathBuf, sync::mpsc::{Receiver, S
 use elf::{endian::AnyEndian, ElfBytes};
 use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
 use ratatui::style::{self, Modifier, Style};
-use tracing::{debug, error, info, span, Level};
+use tracing::{debug, error, info};
 use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, LogFilter, LogFilterType, LogMessage};
 
 

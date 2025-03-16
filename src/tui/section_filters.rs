@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::{self, Modifier, Style}, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
+use ratatui::{layout::Rect, style::{Modifier, Style}, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
 
 use crate::{commander::Command, layout_section::LayoutSection, LogFilter, LogFilterType};
 

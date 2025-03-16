@@ -1,4 +1,4 @@
-use ratatui::style::{self, Style};
+use ratatui::style::{Style};
 
 pub mod tui;
 pub mod commander;
