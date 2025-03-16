@@ -1,6 +1,6 @@
 use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
 
-use tracing::error;
+use tracing::{error, info, span, Level};
 use tracing_subscriber::{fmt, prelude::*, Registry};
 use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, find_log, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
 
@@ -73,15 +73,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .open("uberlog.log")
         .unwrap();
 
+    if std::env::var("RUST_LOG").is_err() {
+        unsafe {
+            std::env::set_var("RUST_LOG", "info")
+        }
+    }
+
     let subscriber = Registry::default()
         .with(
             fmt::layer()
                 .with_writer(log_file)
         )
         .with(tracing_subscriber::filter::EnvFilter::from_default_env());
-
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    info!("Starting app");
     // Load configuration file
     let target_cfg = configuration::load_target_cfg();
     let app_cfg = ApplicationConfiguration::load_cfg();
@@ -90,8 +96,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (commander_tx, commander_rx) = std::sync::mpsc::channel();
     let (commander_responwe_tx, commander_response_rx) = std::sync::mpsc::channel();
     let (rtt_data_tx, rtt_data_rx) = std::sync::mpsc::channel();
-
-
 
     // Instantiate application and commander
     let mut app = App::new(commander_tx.clone(), commander_response_rx, rtt_data_rx, &app_cfg);
@@ -102,7 +106,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     app.command_parser.register_instruction(String::from(":sstart"), stream_start);
     app.command_parser.register_instruction(String::from(":sstop"), stream_stop);
     app.command_parser.register_instruction(String::from(":find"), find_log);
-
     // Register commands -- Filter
     app.command_parser.register_instruction(String::from(":filter"),add_filter);
     
@@ -114,9 +117,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             // Hack-ish: send a probe update command
             let _ = commander_tx.send(Command::GetProbes);
             loop {
+                let _span = span!(Level::DEBUG, "Commander cmd process").entered();
                 match commander.process() {
                     Ok(_) => (),
-                    Err(e) => error!("{}", e),
+                    Err(e) => {
+                        error!("{}", e);
+                        let _ = commander.command_response_tx.send(CommandResponse::TextMessage{message: "Internal error".to_string()});
+                        break;
+                    }
                 }
             }
         });

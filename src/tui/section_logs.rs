@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::Style, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
+use ratatui::{layout::Rect, style::{self, Style}, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
 
 use crate::{commander::Command, layout_section::LayoutSection, LogMessage};
 
@@ -148,7 +148,7 @@ impl LayoutSection for SectionLogs {
                     fg: log.style.bg,
                     bg: log.style.fg,
                     ..Default::default()
-                }
+                }.add_modifier(style::Modifier::BOLD)
             };
             log_lines.push(Line::from(log.message.clone()).style(log_style));
         }

@@ -4,7 +4,7 @@ use std::{fs::read_to_string, io::Write, path::PathBuf, sync::mpsc::{Receiver, S
 use elf::{endian::AnyEndian, ElfBytes};
 use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
 use ratatui::style::{self, Modifier, Style};
-use tracing::{error, info};
+use tracing::{debug, error, info, span, Level};
 use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, LogFilter, LogFilterType, LogMessage};
 
 
@@ -226,9 +226,10 @@ impl Commander {
     /// forever. It will block waiting for commands and then process them as required.
     pub fn process(&mut self) -> Result<(), String> {
         if let Ok(response) = self.command_rx.recv() {
+            debug!("Processing {}", command_to_string(&response));
             match response {
                 Command::GetProbes => {
-                    self.cmd_get_probes();
+                    return self.cmd_get_probes();
                 }
                 Command::Disconnect(probe_serial) => {
                     return self.cmd_disconnect(probe_serial);
@@ -267,6 +268,10 @@ impl Commander {
                     return self.update_log_search(log);
                 }
             }
+        }
+        else {
+            error!("Channel broke, stop further processing");
+            return Err(String::from("channel broken"));
         }
         Ok(())
     }
@@ -594,7 +599,8 @@ impl Commander {
     /// 
     /// Reinitialize all the probe/target information and use it to generate a vector of `TargetInformation`, which
     /// is later sent via a mpsc channel to the entity that queried it
-    fn cmd_get_probes (&mut self) {
+    fn cmd_get_probes (&mut self) -> Result<(), String> {
+
         // Re-initialize
         let _ = self.init();
 
@@ -605,6 +611,8 @@ impl Commander {
 
         // Send the message
         let _ = self.command_response_tx.send(return_value);
+
+        Ok(())
     }
 
     /// Disconnect the logging backend
@@ -739,6 +747,25 @@ impl Commander {
             }
         }
         log
+    }
+}
+
+/// Utility function to get the enum string
+fn command_to_string(cmd: &Command) -> String {
+    match cmd {
+        Command::ClearLogs => String::from("ClearLogs"),
+        Command::GetFilters => String::from("GetFilters"),
+        Command::ParseLogBytes(_) => String::from("ParseLogBytes"),
+        Command::ClearFilters => String::from("ClearFilters"),
+        Command::Reset(_) => String::from("Reset"),
+        Command::AddFilter(_) => String::from("AddFilter"),
+        Command::Disconnect(_) => String::from("Disconnect"),
+        Command::PrintMessage(_) => String::from("PrintMessage"),
+        Command::Connect(_) => String::from("Connect"),
+        Command::FindLog(_) => String::from("FindLog"),
+        Command::GetProbes => String::from("GetProbes"),
+        Command::OpenFile(_) => String::from("OpenFile"),
+        Command::StreamLogs(_, _) => String::from("StreamLogs"),
     }
 }
 
