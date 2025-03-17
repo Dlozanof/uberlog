@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 match commander.process() {
                     Ok(_) => (),
                     Err(e) => {
-                        error!("{}", e);
+                        error!("Commander error: {}", e);
                         let _ = commander.command_response_tx.send(CommandResponse::TextMessage{message: "Internal error".to_string()});
                         break;
                     }

@@ -335,7 +335,7 @@ impl Commander {
     }
 
     fn cmd_parse_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
-        info!("Received <-- {:?} -->", bytes);
+        debug!("Received <-- {:?} -->", bytes);
                 
         // TODO: all this should be done over message, not self.log_raw
         self.log_raw.extend(bytes);
@@ -363,7 +363,7 @@ impl Commander {
             }
             count = count + line.len();
 
-            info!("Processing line <-- {} -->", line);
+            debug!("Processing line <-- {} -->", line);
 
             // Store it
             self.logs_raw.push(line.to_string());
@@ -467,7 +467,8 @@ impl Commander {
                     let mut buf: [u8; 200] = [0; 200];
                     let count = match port.read(buf.as_mut_slice()) {
                         Err(e) => {
-                            error!("{}", e);
+                            error!("Port read error: {}", e);
+                            let _ = command_response_tx.send(CommandResponse::TextMessage { message: "Internal error!!".to_string() });
                             continue;
                         },
                         Ok(count) => count,
@@ -476,16 +477,17 @@ impl Commander {
                     // If there is data, clean and send it
                     if count > 0 {
 
-                        info!("Read {} bytes", count);
+                        debug!("Read {} bytes", count);
                         // Take the part with data
                         let (buf, _) = buf.split_at(count);
 
                         // Send the message
-                        info!("Sending: <-- {:?} -->", buf);
+                        debug!("Sending: <-- {:?} -->", buf);
                         match tx.send(Command::ParseLogBytes(Vec::from(buf))) {
                             Ok(_) => (),
                             Err(e) => {
-                                error!("{}", e);
+                                error!("Send error: {}", e);
+                                let _ = command_response_tx.send(CommandResponse::TextMessage { message: "Internal error!!".to_string() });
                                 continue;
                             }
                         }
@@ -542,7 +544,7 @@ impl Commander {
                 let mut rtt = match Rtt::attach_region(&mut core,&ScanRegion::Exact(rtt_address)) {
                     Ok(val) => val,
                     Err(e) => {
-                        error!("{}", e);
+                        error!("Attach region error: {}", e);
                         return;
                     }
                 };
@@ -564,7 +566,7 @@ impl Commander {
                         let count = match input.read(&mut core, &mut buf) {
                             Ok(val) => val,
                             Err(e) => {
-                                error!("{}", e);
+                                error!("RTT read error: {}", e);
                                 continue;
                             }
                         };
@@ -581,7 +583,7 @@ impl Commander {
                             match tx.send(Command::ParseLogBytes(Vec::from(buf))) {
                                 Ok(_) => (),
                                 Err(e) => {
-                                    error!("{}", e);
+                                    error!("Message send error: {}", e);
                                     continue;
                                 }
                             }
