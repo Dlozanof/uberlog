@@ -460,6 +460,11 @@ impl Commander {
             let command_response_tx = self.command_response_tx.clone();
             probe_info.is_connected = true;
 
+            // Copy serial to the thread, since it uses to request a Delete of the probe in case
+            // of hard error
+            let serial_id = probe_info.probe_info.clone().serial_number.expect("No serial");
+            let commander_tx = self.command_tx.clone();
+
             // Actual thread
             let handle = std::thread::spawn(move || {
 
@@ -491,10 +496,21 @@ impl Commander {
                             if e.kind() == std::io::ErrorKind::TimedOut {
                                 continue;
                             }
+                            
+                            // Broken pipe means the cable was disconnected and an infinite loop
+                            // happens, manage it
+                            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                                error!("Serial port connection error");
+                                let _ = commander_tx.send(Command::Disconnect(serial_id.clone()));
+                                let _ = commander_tx.send(Command::Delete(serial_id.clone()));
+                                let _ = commander_tx.send(Command::PrintMessage( String::from("Serial port connection error") ));
+                                break;
+                            }
 
                             // Otherwise report it
                             error!("Port read error: {}", e);
                             let _ = command_response_tx.send(CommandResponse::TextMessage { message: format!("Error reading port {}", e) });
+                            
                             continue;
                         },
                         Ok(count) => count,
@@ -707,7 +723,9 @@ impl Commander {
         let channel = probe_info.log_thread_control_tx.take().ok_or("Thread is running but the SPMC channel is down!")?;
         match channel.send(false) {
             Ok(_) => (),
-            Err(e) => return Err(format!("{}", e)),
+            Err(_) => {
+                error!("Channel closed, benign if happens during handling of unexpected disconnection");
+            }
         }
 
         // Wait for the thread to die, and remove the session
