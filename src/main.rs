@@ -2,7 +2,7 @@ use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
 
 use tracing::{error, info, span, Level};
 use tracing_subscriber::{fmt, prelude::*, Registry};
-use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, find_log, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
+use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, find_log, open_file, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
 
 use tokio::runtime::Runtime;
 use std::sync::mpsc::{Receiver, Sender};
@@ -19,10 +19,6 @@ use ratatui::crossterm::event::DisableMouseCapture;
 use ratatui::crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
 
 pub struct App {
-    
-    // Configuration
-    config: ApplicationConfiguration,
-
     current_screen: CurrentScreen,
     
     pub command_tx: Sender<Command>,
@@ -48,22 +44,8 @@ pub enum CurrentScreen {
     #[default]
     Live,
     Filters,
+    Probes,
 }
-
-fn open_file_command(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
-    if input.is_empty() {
-        return Err(String::from("path no"));
-    }
-
-    if input.len() > 1 {
-        return Err(String::from("Too many arguments"));
-    }
-
-    let _ = sender.send(Command::OpenFile(PathBuf::from(&input[0])));
-
-    Ok(())
-}
-
 
 fn main() -> Result<(), Box<dyn Error>> {
 
@@ -102,7 +84,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut commander = Commander::new(commander_tx.clone(), commander_rx, commander_responwe_tx, rtt_data_tx, target_cfg, &app_cfg);
 
     // Register commands -- File
-    app.command_parser.register_instruction(String::from(":open"),open_file_command);
+    app.command_parser.register_instruction(String::from(":open"), open_file);
     app.command_parser.register_instruction(String::from(":sstart"), stream_start);
     app.command_parser.register_instruction(String::from(":sstop"), stream_stop);
     app.command_parser.register_instruction(String::from(":find"), find_log);
@@ -114,8 +96,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let _enter = rt.enter();
     std::thread::spawn(move || {
         rt.block_on(async {
-            // Hack-ish: send a probe update command
-            let _ = commander_tx.send(Command::GetProbes);
             loop {
                 let _span = span!(Level::DEBUG, "Commander cmd process").entered();
                 match commander.process() {
@@ -184,6 +164,18 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                 KeyCode::Char('q') => {
                                     return Ok(true)
                                 },
+                                
+                                // Switch to Filter view
+                                KeyCode::Char('F') => {
+                                    let _ = app.command_tx.send(Command::GetFilters);
+                                    app.current_screen = CurrentScreen::Filters;
+                                },
+                                
+                                // Switch to Probe view
+                                KeyCode::Char('P') => {
+                                    let _ = app.command_tx.send(Command::GetProbes);
+                                    app.current_screen = CurrentScreen::Probes;
+                                },
 
                                 // So far only process comands in `Live` screen
                                 KeyCode::Char(':') | KeyCode::Char('/') => {
@@ -191,15 +183,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                     app.command_parser.process_key(key.code);
                                 },
 
-                                // Switch to Filter view
-                                KeyCode::Char('F') => {
-                                    let _ = app.command_tx.send(Command::GetFilters);
-                                    app.current_screen = CurrentScreen::Filters;
-                                },
-
                                 // Otherwise forward to sub-views
                                 key => {
-                                    app.section_probes.process_key(key);
                                     app.section_logs.process_key(key);
                                 }
                             }
@@ -210,9 +195,35 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                 KeyCode::Char('q') | KeyCode::Esc => {
                                     app.current_screen = CurrentScreen::Live;
                                 },
+
+                                // Switch to Probe view
+                                KeyCode::Char('P') => {
+                                    let _ = app.command_tx.send(Command::GetProbes);
+                                    app.current_screen = CurrentScreen::Probes;
+                                },
+
                                 // Otherwise forward to sub-views
                                 key => {
                                     app.section_filters.process_key(key);
+                                }
+                            }
+                        }
+                        CurrentScreen::Probes => {
+                            match key.code {
+                                // Only exit the application from `Live` screen
+                                KeyCode::Char('q') | KeyCode::Esc => {
+                                    app.current_screen = CurrentScreen::Live;
+                                },
+                                
+                                // Switch to Filter view
+                                KeyCode::Char('F') => {
+                                    let _ = app.command_tx.send(Command::GetFilters);
+                                    app.current_screen = CurrentScreen::Filters;
+                                },
+                                
+                                // Otherwise forward to sub-views
+                                key => {
+                                    app.section_probes.process_key(key);
                                 }
                             }
                         }
@@ -240,6 +251,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                 CommandResponse::UpdateSearchLog(log) => {
                     app.section_logs.update_search_log(log);
                 }
+                CommandResponse::ProbeConnected(is_connected) => {
+                    app.section_probes.set_connected(0, is_connected);
+                }
             }
         }
 
@@ -252,11 +266,14 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 
 pub fn ui(frame: &mut Frame, app: &mut App) {
 
+    // Depending on the current view allocate some lines on top
     let top_side_lines = match app.current_screen {
-        CurrentScreen::Live => app.section_probes.min_lines(),
+        CurrentScreen::Live => 0,
         CurrentScreen::Filters => app.section_filters.min_lines(),
+        CurrentScreen::Probes => app.section_probes.min_lines(),
     };
     
+    // Prepare chunks
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -266,10 +283,11 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.area());
 
-    // Print either Probes or Filters depending on the current screen
+    // If a view other than Live is selected, show it
     match app.current_screen {
-        CurrentScreen::Live => app.section_probes.ui(frame, chunks[0]),
+        CurrentScreen::Probes => app.section_probes.ui(frame, chunks[0]),
         CurrentScreen::Filters => app.section_filters.ui(frame, chunks[0]),
+        CurrentScreen::Live => ()
     }
 
     // Show Logs section
@@ -291,7 +309,6 @@ impl App {
 
         let aliases = cfg.alias_list.clone();
         App {
-            config: cfg.clone(),
             command_tx: command_tx.clone(),
             command_response_rx,
             rtt_data_rx,

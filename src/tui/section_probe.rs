@@ -1,7 +1,8 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::Style, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
+use ratatui::{layout::Rect, style::Style, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
+use tracing::error;
 
 use crate::{commander::{Command, LogBackendInformation, TargetInformation}, layout_section::LayoutSection};
 
@@ -11,25 +12,42 @@ pub struct SectionProbes {
     pub command_tx: Sender<Command>,
 }
 
+impl SectionProbes {
+    pub fn set_connected(&mut self, index: usize, is_connected: bool) {
+        // Bound check
+        if index >= self.targets.len() {
+            error!("Out of bounds");
+        }
+
+        // Update it
+        self.targets[index].is_connected = is_connected;
+    }
+}
+
 impl LayoutSection for SectionProbes {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
+
         // Probe information
         let mut probe_list_lines = Vec::new();
+
         for info in &self.targets {
-            probe_list_lines.push(Line::from(format!("{} [{}]", info.probe_name, info.probe_serial)));
+            let status = match info.is_connected {
+               true => "Connected",
+               false => "Not connected",
+            };
             match &info.backend {
                 LogBackendInformation::Rtt(elfpath) => {
-                    probe_list_lines.push(Line::from(format!("-> {} {}", info.mcu, elfpath)));
+                    probe_list_lines.push(Line::from(format!(" {} | {} [{}] -> {} {}", status, info.probe_name, info.probe_serial, info.mcu, elfpath)));
                 }
                 LogBackendInformation::Uart(port, baud) => {
-                    probe_list_lines.push(Line::from(format!("-> {} {} ({} bauds)", info.mcu, port, baud)));
+                    probe_list_lines.push(Line::from(format!(" {} | {} [{}] -> {} {} ({} bauds)", status, info.probe_name, info.probe_serial, info.mcu, port, baud)));
                 }
             }
         }
         let probse_block_title = Line::from("Debug probes");
         let probes_block = Block::default()
             .title(probse_block_title)
-            .borders(Borders::ALL)
+            .borders(Borders::ALL).border_type(BorderType::Double)
             .style(Style::default());
 
         let probe_list  = Paragraph::new(probe_list_lines).block(probes_block);
@@ -61,6 +79,6 @@ impl LayoutSection for SectionProbes {
     }
 
     fn min_lines(&self) -> usize {
-        return 2 /*borders */ + self.targets.len().max(1) * 2;
+        return 2 /*borders */ + self.targets.len().max(1);
     }
 }

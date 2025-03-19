@@ -50,6 +50,7 @@ pub enum Command {
     GetProbes,
     Connect(TargetInformation),
     Disconnect(String),
+    Delete(String),
     Reset(String),
     ParseLogBytes(Vec<u8>),
 
@@ -68,8 +69,12 @@ pub enum Command {
 
 
 pub enum CommandResponse {
+    /// Misc
     TextMessage{message: String},
+
+    /// Probes
     ProbeInformation{probes: Vec<TargetInformation>},
+    ProbeConnected(bool),
 
     /// Filters
     UpdateFilterList(Vec<LogFilter>),
@@ -101,6 +106,7 @@ pub struct TargetInformation {
     pub probe_serial: String,
     pub mcu: String,
     pub backend: LogBackendInformation,
+    pub is_connected: bool,
 }
 
 impl TargetInformation {
@@ -110,6 +116,7 @@ impl TargetInformation {
             probe_serial: mcu.probe_info.serial_number.clone().unwrap_or("Unknown".to_string()),
             mcu: mcu.mcu.clone(),
             backend: mcu.backend.clone(),
+            is_connected: mcu.is_connected,
         }
     }
 }
@@ -127,6 +134,8 @@ pub struct TargetMcu {
     pub probe_info: DebugProbeInfo,
     /// MCU name, must be compatible with probe-rs
     pub mcu: String,
+    /// Store connection status
+    pub is_connected: bool,
 
     /// Details about the log backend used by the target
     pub backend: LogBackendInformation,
@@ -233,6 +242,9 @@ impl Commander {
                 }
                 Command::Disconnect(probe_serial) => {
                     return self.cmd_disconnect(probe_serial);
+                },
+                Command::Delete(probe_serial) => {
+                    return self.cmd_delete(probe_serial);
                 },
                 Command::Connect(probe_details) => {
                     return self.cmd_connect(probe_details);
@@ -415,6 +427,12 @@ impl Commander {
     fn cmd_connect(&mut self, probe_details: TargetInformation) -> Result<(), String> {
 
         let probe_info: &mut TargetMcu = self.probes.iter_mut().find(|target_mcu| *target_mcu.probe_info.serial_number.as_ref().unwrap() == probe_details.probe_serial).ok_or("Unable to find probe")?;
+        
+        info!("Connecting to {}", probe_info.probe_info.clone().serial_number.expect("no serial number!"));
+        if probe_info.is_connected {
+            info!("Probe is already connected");
+            return Ok(());
+        }
     
         match &probe_info.backend {
             LogBackendInformation::Rtt(_) => return self.cmd_connect_rtt(probe_details),
@@ -435,11 +453,12 @@ impl Commander {
         };
 
         if probe_info.log_thread_control_tx.is_none() {
-            let (rtt_stream_control_tx, rtt_stream_control_rx) = std::sync::mpsc::channel();
-            probe_info.log_thread_control_tx = Some(rtt_stream_control_tx);
+            let (log_thread_control_tx, rtt_stream_control_rx) = std::sync::mpsc::channel();
+            probe_info.log_thread_control_tx = Some(log_thread_control_tx);
 
             let tx = self.command_tx.clone();
             let command_response_tx = self.command_response_tx.clone();
+            probe_info.is_connected = true;
 
             // Actual thread
             let handle = std::thread::spawn(move || {
@@ -448,10 +467,11 @@ impl Commander {
 
                 info!("Opening serial port {} with baud rate {}", dev_path, baud);
                 let mut port = serialport::new(dev_path, baud)
-                    .timeout(std::time::Duration::from_secs(3600))
+                    .timeout(std::time::Duration::from_secs(1))
                     .open().expect("Failed to open port");
                 info!("Serial port opened");
                 let _ = command_response_tx.send(CommandResponse::TextMessage { message: "Connected".to_string() });
+                let _ = command_response_tx.send(CommandResponse::ProbeConnected(true));
 
 
                 loop {
@@ -467,8 +487,14 @@ impl Commander {
                     let mut buf: [u8; 200] = [0; 200];
                     let count = match port.read(buf.as_mut_slice()) {
                         Err(e) => {
+                            // Timeout is expected since we are polling
+                            if e.kind() == std::io::ErrorKind::TimedOut {
+                                continue;
+                            }
+
+                            // Otherwise report it
                             error!("Port read error: {}", e);
-                            let _ = command_response_tx.send(CommandResponse::TextMessage { message: "Internal error!!".to_string() });
+                            let _ = command_response_tx.send(CommandResponse::TextMessage { message: format!("Error reading port {}", e) });
                             continue;
                         },
                         Ok(count) => count,
@@ -531,8 +557,7 @@ impl Commander {
             let tx = self.command_tx.clone();
             info!("Converting {}", rtt_address);
 
-            //let egui_ctx = self.egui_ctx.clone();
-
+            let command_response_tx = self.command_response_tx.clone();
             let handle = std::thread::spawn(move || {
 
                 info!("Thread started");
@@ -551,6 +576,8 @@ impl Commander {
                 info!("Region attached");
                 info!("There are {} channels", rtt.up_channels().len());
 
+                let _ = command_response_tx.send(CommandResponse::TextMessage { message: "Connected".to_string() });
+                let _ = command_response_tx.send(CommandResponse::ProbeConnected(true));
                 let input = &mut rtt.up_channels()[0];
                 {
                     loop {
@@ -601,10 +628,56 @@ impl Commander {
     /// 
     /// Reinitialize all the probe/target information and use it to generate a vector of `TargetInformation`, which
     /// is later sent via a mpsc channel to the entity that queried it
+    /// Self reveiew: If this was better it would be nasty, currently is just... welp.
     fn cmd_get_probes (&mut self) -> Result<(), String> {
+        info!("Get probes");
 
-        // Re-initialize
-        let _ = self.init();
+        // If there are no probes, initialize the module. Otherwise update list
+        if self.probes.is_empty() {
+            let _ = self.init();
+        }
+        else {
+
+            // Add new probes
+            let lister = Lister::new();
+            for probe in lister.list_all() {
+                if let Some(target) = self.target_cfg.targets.iter().filter(|t| t.probe_id == *probe.serial_number.as_ref().unwrap()).next() {
+
+                    // Get current list of probe serial ids 
+                    let current_serials: Vec<String> = self.probes.iter().map(|t| t.probe_info.serial_number.clone().unwrap()).collect();
+
+                    // If new one is already present, skip further steps
+                    if let Some(probe_serial) = &probe.serial_number {
+                        if current_serials.contains(&probe_serial) {
+                            continue;
+                        }
+                    }
+
+                    // Otherwise add it
+                    self.probes.push(TargetMcu {
+                            name: target.name.clone(),
+                            mcu: target.processor.clone(),
+                            probe_info: probe.clone(),
+                            backend: match &target.log_backend {
+                                LogBackend::Rtt{elf_path} => LogBackendInformation::Rtt(Commander::rtt_block_from_elf(elf_path)?),
+                                LogBackend::Uart{dev, baud}  => LogBackendInformation::Uart(dev.clone(), *baud),
+                            },
+                            log_thread: None,
+                            log_thread_control_tx: None,
+                            is_connected: false,
+                    });
+                }
+            }
+
+            // Remove non existin probes
+            let available_probes_serials: Vec<String> = lister.list_all().iter().map(|t| t.serial_number.clone().expect("No serial!")).collect();
+            let missing_probes: Vec<&TargetMcu> = self.probes.iter().filter(|t| !available_probes_serials.contains(&t.probe_info.serial_number.clone().unwrap())).collect();
+
+            for probe in missing_probes {
+                info!("Probe missing, cleaning up: {}", probe.probe_info.serial_number.clone().expect("no serial"));
+                let _ = self.command_tx.send(Command::Delete(probe.probe_info.serial_number.clone().expect("No serial!")));
+            }
+        }
 
         // Create output
         let return_value = CommandResponse::ProbeInformation{
@@ -624,6 +697,12 @@ impl Commander {
     fn cmd_disconnect(&mut self, probe_serial: String) -> Result<(), String> {
         let probe_info = self.probes.iter_mut().find(|target_mcu| *target_mcu.probe_info.serial_number.as_ref().unwrap() == probe_serial).ok_or("Unable to find probe")?;
 
+        info!("Disconnecting {}", probe_info.probe_info.clone().serial_number.expect("no serial number!"));
+        if !probe_info.is_connected {
+            info!("Probe is not connected");
+            return Ok(());
+        }
+
         let handle = probe_info.log_thread.take().ok_or("Streaming was not active, or something really bad is happening (thread leaked)")?;
         let channel = probe_info.log_thread_control_tx.take().ok_or("Thread is running but the SPMC channel is down!")?;
         match channel.send(false) {
@@ -638,7 +717,37 @@ impl Commander {
         }
 
         info!("Disconnected");
+        probe_info.is_connected = false;
         let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: "Disconnected".to_string() });
+        let _ = self.command_response_tx.send(CommandResponse::ProbeConnected(false));
+        Ok(())
+    }
+
+    /// Delete a probe
+    ///
+    /// Used when a probe is not present anymore.
+    fn cmd_delete(&mut self, probe_serial: String) -> Result<(), String> {
+
+        // Get index
+        let probe_idx = self.probes.iter_mut().position(|target_mcu| *target_mcu.probe_info.serial_number.as_ref().unwrap() == probe_serial).ok_or("Unable to find probe")?;
+
+        // Print information and make sure the probe is disconnected, request a disconnect+delete
+        // otherwise
+        let probe_info = &self.probes[probe_idx];
+        info!("Delete {}", probe_info.probe_info.clone().serial_number.expect("no serial number!"));
+        if probe_info.is_connected {
+            info!("Probe is still connected, queuing a disconnect and another delete");
+            let _ = self.command_tx.send(Command::Disconnect(probe_serial.clone()));
+            let _ = self.command_tx.send(Command::Delete(probe_serial));
+            return Ok(());
+        }
+
+        // Probe is not connected, remove it
+        self.probes.remove(probe_idx);
+
+        // Refresh probe list
+        let _ = self.command_tx.send(Command::GetProbes);
+            
         Ok(())
     }
 
@@ -698,6 +807,7 @@ impl Commander {
                     },
                     log_thread: None,
                     log_thread_control_tx: None,
+                    is_connected: false,
                 });
             }
         }
@@ -768,6 +878,7 @@ fn command_to_string(cmd: &Command) -> String {
         Command::GetProbes => String::from("GetProbes"),
         Command::OpenFile(_) => String::from("OpenFile"),
         Command::StreamLogs(_, _) => String::from("StreamLogs"),
+        Command::Delete(_) => String::from("Delete"),
     }
 }
 
@@ -856,3 +967,20 @@ pub fn find_log(sender: &Sender<Command>, input: Vec<String>) -> Result<(), Stri
     let _ = sender.send(Command::FindLog(input[0].clone()));
     Ok(())
 }
+
+/// Open a file
+pub fn open_file(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
+    if input.is_empty() {
+        return Err(String::from("path no"));
+    }
+
+    if input.len() > 1 {
+        return Err(String::from("Too many arguments"));
+    }
+
+    let _ = sender.send(Command::OpenFile(PathBuf::from(&input[0])));
+
+    Ok(())
+}
+
+
