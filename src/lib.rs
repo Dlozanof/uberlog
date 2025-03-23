@@ -1,10 +1,11 @@
-use ratatui::style::{Style};
+use ratatui::style::Style;
 
 pub mod tui;
 pub mod commander;
 pub mod configuration;
 pub mod layout_section;
 pub mod command_parser;
+pub mod log_source;
 
 #[derive(Clone)]
 pub struct LogMessage {

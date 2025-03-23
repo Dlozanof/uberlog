@@ -5,7 +5,7 @@ use elf::{endian::AnyEndian, ElfBytes};
 use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
 use ratatui::style::{self, Modifier, Style};
 use tracing::{debug, error, info};
-use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, LogFilter, LogFilterType, LogMessage};
+use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, log_source::{file_source::FileSource, log_source::LogSource}, LogFilter, LogFilterType, LogMessage};
 
 
 pub struct Commander {
@@ -44,6 +44,7 @@ pub enum Command {
 
     // File
     OpenFile(std::path::PathBuf),
+    StreamFile(String),
     StreamLogs(bool, String),
 
     // Probes
@@ -192,6 +193,15 @@ impl Commander {
         Ok(())
     }
 
+    /// Stream file 
+    fn cmd_stream_file(&mut self, path: String) -> Result<(), String> {
+
+        let mut log_source = FileSource::new(path.clone(), self.command_tx.clone());
+        log_source.connect();
+
+        Ok(())
+    }
+
     /// Configure log streaming
     /// 
     /// Receive a status update and a path where to stream
@@ -260,6 +270,9 @@ impl Commander {
                 }
                 Command::OpenFile(path) => {
                     return self.cmd_open_file(path);
+                }
+                Command::StreamFile(path) => {
+                    return self.cmd_stream_file(path);
                 }
                 Command::PrintMessage(msg) => {
                     let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: msg });
@@ -897,6 +910,7 @@ fn command_to_string(cmd: &Command) -> String {
         Command::OpenFile(_) => String::from("OpenFile"),
         Command::StreamLogs(_, _) => String::from("StreamLogs"),
         Command::Delete(_) => String::from("Delete"),
+        Command::StreamFile(_) => String::from("StreamFile"),
     }
 }
 
@@ -1000,5 +1014,21 @@ pub fn open_file(sender: &Sender<Command>, input: Vec<String>) -> Result<(), Str
 
     Ok(())
 }
+
+/// Stream an input file 
+pub fn stream_file(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
+    if input.is_empty() {
+        return Err(String::from("path no"));
+    }
+
+    if input.len() > 1 {
+        return Err(String::from("Too many arguments"));
+    }
+
+    let _ = sender.send(Command::StreamFile(input[0].clone()));
+
+    Ok(())
+}
+
 
 
