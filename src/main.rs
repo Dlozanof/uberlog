@@ -260,7 +260,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 
         // Read data
         while let Ok(message) = app.rtt_data_rx.try_recv() {
-            app.section_logs.logs.push(message);
+            app.section_logs.append_log(message);
         }
     }
 }

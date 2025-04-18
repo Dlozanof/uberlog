@@ -24,16 +24,20 @@ pub struct FileSource {
 
     /// File that is opened
     file_name: String,
+
+    /// Identifier of this source
+    id: i32,
 }
 
 impl FileSource {
-    pub fn new(file_name: String, command_tx: Sender<Command>) -> FileSource {
+    pub fn new(id: i32, file_name: String, command_tx: Sender<Command>) -> FileSource {
         FileSource {
             handle: None,
             thread_control_tx: None,
             command_tx,
             file_name,
-            is_connected: false
+            is_connected: false,
+            id,
         }
     }
 }
@@ -68,6 +72,7 @@ impl LogSource for FileSource {
 
         let _ = command_tx.send(Command::PrintMessage( format!("Streaming from `{}`", self.file_name) ));
 
+        let id = self.id;
         // Define the thread
         let handle = std::thread::spawn(move || {
 
@@ -90,7 +95,7 @@ impl LogSource for FileSource {
                             if nbytes > 0 {
                                 // Send the message
                                 debug!("Sending: <-- {:?} -->", out_bytes);
-                                match command_tx.send(Command::ParseLogBytes(Vec::from(out_bytes))) {
+                                match command_tx.send(Command::ParseLogBytes(id, Vec::from(out_bytes))) {
                                     Ok(_) => (),
                                     Err(e) => {
                                         error!("Send error: {}", e);

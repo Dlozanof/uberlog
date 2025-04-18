@@ -5,8 +5,49 @@ use elf::{endian::AnyEndian, ElfBytes};
 use probe_rs::{probe::{list::Lister, DebugProbeInfo}, rtt::{Rtt, ScanRegion}, Permissions};
 use ratatui::style::{self, Modifier, Style};
 use tracing::{debug, error, info};
-use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, log_source::{file_source::FileSource, log_source::LogSource}, LogFilter, LogFilterType, LogMessage};
+use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, log_source::{file_source::FileSource, log_source::LogSource}, LogFilter, LogFilterType, LogMessage, LogTimestamp};
 
+/// In charge of providing a place where to store not-fully-processed logs
+///
+/// Since bytes come in chunks that do not have to contain a full string, partial
+/// storage is needed
+pub struct RawLogStorageManager {
+    storage: Vec<Vec<u8>>
+}
+
+impl RawLogStorageManager {
+    pub fn new() -> RawLogStorageManager {
+        RawLogStorageManager{
+            storage: Vec::new()
+        }
+    }
+
+    pub fn take_bytes(&mut self, id: i32) -> Option<Vec<u8>> {
+        let id = id as usize;
+        if id >= self.storage.len() {
+            error!("Storage for {} does not exist", id);
+            return None;
+        }
+
+        Some(std::mem::take(&mut self.storage[id]))
+    }
+
+    pub fn set_bytes(&mut self, id: i32, bytes: Vec<u8>) {
+        let id = id as usize;
+        if id >= self.storage.len() {
+            error!("Storage for {} does not exist", id);
+            return;
+        }
+
+        self.storage[id] = bytes;
+    }
+
+    pub fn alloc_new_vector(&mut self) -> i32 {
+        let ret = self.storage.len();
+        self.storage.push(Vec::new());
+        ret as i32
+    }
+}
 
 pub struct Commander {
 
@@ -15,7 +56,7 @@ pub struct Commander {
 
     /// Log filtering feature
     filters: Vec<LogFilter>,
-    logs_raw: Vec<String>,
+    logs_raw: Vec<LogMessage>,
 
     /// Configuration
     pub target_cfg: TargetConfiguration,
@@ -26,7 +67,7 @@ pub struct Commander {
     pub stream_logs_file_handle: Option<std::fs::File>,
 
     // Temporary log storage
-    pub log_raw: Vec<u8>,
+    pub log_storage: RawLogStorageManager,
 
     /// Command input
     pub command_rx: Receiver<Command>,
@@ -53,7 +94,7 @@ pub enum Command {
     Disconnect(String),
     Delete(String),
     Reset(String),
-    ParseLogBytes(Vec<u8>),
+    ParseLogBytes(i32, Vec<u8>),
 
     // Misc
     PrintMessage(String),
@@ -167,7 +208,7 @@ impl Commander {
             rtt_tx,
             stream_logs: false,
             stream_logs_file_handle: None,
-            log_raw: Vec::new(),
+            log_storage: RawLogStorageManager::new(),
         };
         let _ = ret.init();
         ret
@@ -176,19 +217,19 @@ impl Commander {
     /// Open log file
     /// 
     /// Open a file with text data and parse it
-    fn cmd_open_file(&mut self, path: PathBuf) -> Result<(), String> {
+    fn cmd_open_file(&mut self, _path: PathBuf) -> Result<(), String> {
 
-        if let Ok(content) = read_to_string(path) {
-            for line in content.lines() {
-                // Store it
-                self.logs_raw.push(line.to_string());
-                
-                // Apply filters
-                if let Some(log_message) = self.apply_filters(line.to_string()) {
-                    let _ = self.rtt_tx.send(log_message);
-                }
-            }
-        }
+        //if let Ok(content) = read_to_string(path) {
+        //    for line in content.lines() {
+        //        // Store it
+        //        self.logs_raw.push(line.to_string());
+        //        
+        //        // Apply filters
+        //        if let Some(log_message) = self.apply_filters(line.to_string()) {
+        //            let _ = self.rtt_tx.send(log_message);
+        //        }
+        //    }
+        //}
 
         Ok(())
     }
@@ -196,7 +237,8 @@ impl Commander {
     /// Stream file 
     fn cmd_stream_file(&mut self, path: String) -> Result<(), String> {
 
-        let mut log_source = FileSource::new(path.clone(), self.command_tx.clone());
+        let id = self.log_storage.alloc_new_vector();
+        let mut log_source = FileSource::new(id, path.clone(), self.command_tx.clone());
         log_source.connect();
 
         Ok(())
@@ -215,8 +257,8 @@ impl Commander {
 
             // Otherwise open file
             if let Ok(mut p) = std::fs::File::create(&path) {
-                for line in &self.logs_raw {
-                    let _ = p.write_all(line.as_bytes());
+                for log in &self.logs_raw {
+                    let _ = p.write_all(log.message.as_bytes());
                 }
                 self.stream_logs_file_handle = Some(p);
                 self.stream_logs = true;
@@ -265,8 +307,8 @@ impl Commander {
                 Command::StreamLogs(streaming, path) => {
                     return self.cmd_log_stream(streaming, path);
                 }
-                Command::ParseLogBytes(bytes) => {
-                    return self.cmd_parse_bytes(bytes);
+                Command::ParseLogBytes(id, bytes) => {
+                    return self.cmd_parse_bytes(id, bytes);
                 }
                 Command::OpenFile(path) => {
                     return self.cmd_open_file(path);
@@ -327,7 +369,7 @@ impl Commander {
         // Empty current log list
         let filtered_messages: Vec<LogMessage> = self.logs_raw
             .iter()
-            .map(|msg| self.apply_filters(msg.to_string()))
+            .map(|msg| self.apply_filters(msg.timestamp, msg.source_id, msg.message.to_string()))
             .map(|msg| msg.unwrap())
             .collect();
 
@@ -347,38 +389,48 @@ impl Commander {
         // Empty current log list
         let filtered_messages: Vec<LogMessage> = self.logs_raw
             .iter()
-            .map(|msg| self.apply_filters(msg.to_string()))
+            .map(|msg| self.apply_filters(msg.timestamp, msg.source_id, msg.message.to_string()))
             .filter(|msg| msg.is_some())
             .map(|msg| msg.unwrap())
             .collect();
 
-        let filt_len = filtered_messages.len();
         let _ = self.command_response_tx.send(CommandResponse::UpdateLogs(filtered_messages));
-        let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: format!("Added: {:?} -- {}/{}", filter, filt_len, self.log_raw.len()) });
+        let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: format!("Added: {:?}", filter) });
 
         Ok(())
     }
 
-    fn cmd_parse_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+    fn cmd_parse_bytes(&mut self, id: i32, bytes: Vec<u8>) -> Result<(), String> {
         debug!("Received <-- {:?} -->", bytes);
-                
-        // TODO: all this should be done over message, not self.log_raw
-        self.log_raw.extend(bytes);
+
+        // Get current bytes
+        let mut log_bytes = match self.log_storage.take_bytes(id) {
+            Some(bytes) => bytes,
+            None => {
+                error!("Wrong storage ID: {}", id);
+                return Err("Wrong storage ID".to_string());
+            }
+        };
+
+        log_bytes.extend(bytes);
 
         // Remove ansi colors...
-        self.log_raw = strip_ansi_escapes::strip(&self.log_raw);
+        log_bytes = strip_ansi_escapes::strip(&log_bytes);
 
         // ... and remove strange characters
-        self.log_raw.retain(|c| c.is_ascii());
+        log_bytes.retain(|c| c.is_ascii());
 
         // The remaining part should be utf8, so transform it
-        let s = match std::str::from_utf8(&self.log_raw) {
+        let s = match std::str::from_utf8(&log_bytes) {
             Ok(v) => v,
             Err(e) => {
                 error!("Invalid UTF-8 sequence: {}", e);
                 return Err("Invalid characters".to_string());
             }
         };
+
+        // Get timestamp
+        let ts = LogTimestamp::now();
 
         let mut count = 0;
         // Iterate over every line
@@ -391,7 +443,12 @@ impl Commander {
             debug!("Processing line <-- {} -->", line);
 
             // Store it
-            self.logs_raw.push(line.to_string());
+            self.logs_raw.push(LogMessage {
+                timestamp: ts,
+                source_id: id,
+                message: line.to_string(),
+                style: Style::default().add_modifier(Modifier::DIM),
+            });
 
             // If we are streaming logs to a file, add the line to it
             if let Some(handle) =  &mut self.stream_logs_file_handle {
@@ -403,15 +460,14 @@ impl Commander {
             }
 
             // Apply filters
-            if let Some(log_message) = self.apply_filters(line.to_string()) {
-                //let log_message = ratatui::text::Line::from(log_message.message).style(log_message.color);
+            if let Some(log_message) = self.apply_filters(ts, id, line.to_string()) {
                 let _ = self.rtt_tx.send(log_message);
             }
         }
 
         // Let's try to be as ineficient as possible
-        let (_, b) = self.log_raw.split_at(count);
-        self.log_raw = Vec::from(b);
+        let (_, b) = log_bytes.split_at(count);
+        self.log_storage.set_bytes(id, Vec::from(b));
 
         Ok(())
     }
@@ -538,7 +594,7 @@ impl Commander {
 
                         // Send the message
                         debug!("Sending: <-- {:?} -->", buf);
-                        match tx.send(Command::ParseLogBytes(Vec::from(buf))) {
+                        match tx.send(Command::ParseLogBytes(0, Vec::from(buf))) {
                             Ok(_) => (),
                             Err(e) => {
                                 error!("Send error: {}", e);
@@ -636,7 +692,7 @@ impl Commander {
 
                             // Send the message
                             info!("Sending: <-- {:?} -->", buf);
-                            match tx.send(Command::ParseLogBytes(Vec::from(buf))) {
+                            match tx.send(Command::ParseLogBytes(0, Vec::from(buf))) {
                                 Ok(_) => (),
                                 Err(e) => {
                                     error!("Message send error: {}", e);
@@ -843,15 +899,19 @@ impl Commander {
             }
         }
 
+        self.log_storage.alloc_new_vector(); // Hopefully zero
+
         Ok(())
     }
     
     /// Apply filters to a log message
-    fn apply_filters(&self, log: String) -> Option<LogMessage> {
+    fn apply_filters(&self, timestamp: LogTimestamp, id: i32, log: String) -> Option<LogMessage> {
 
         let mut log = Some(LogMessage{
+            timestamp: timestamp.clone(),
             style: Style::default().add_modifier(Modifier::DIM),
-            message: log
+            message: log,
+            source_id: id,
         });
 
         for current_filter in &self.filters {
@@ -882,8 +942,10 @@ impl Commander {
                     let matches_msg = tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
                     if matches_msg {
                         log = Some(LogMessage{
+                            timestamp: timestamp.clone(),
                             message: log.unwrap().message,
                             style: current_filter.style,
+                            source_id: id,
                         });
                     }
                 }
@@ -898,7 +960,7 @@ fn command_to_string(cmd: &Command) -> String {
     match cmd {
         Command::ClearLogs => String::from("ClearLogs"),
         Command::GetFilters => String::from("GetFilters"),
-        Command::ParseLogBytes(_) => String::from("ParseLogBytes"),
+        Command::ParseLogBytes(_, _) => String::from("ParseLogBytes"),
         Command::ClearFilters => String::from("ClearFilters"),
         Command::Reset(_) => String::from("Reset"),
         Command::AddFilter(_) => String::from("AddFilter"),

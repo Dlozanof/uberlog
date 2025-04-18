@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use crossterm::event::KeyCode;
 use ratatui::{layout::Rect, style::{self, Style}, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
 
-use crate::{commander::Command, layout_section::LayoutSection, LogMessage};
+use crate::{commander::Command, layout_section::LayoutSection, LogMessage, LogTimestamp};
 
 
 enum SearchDirection {
@@ -34,9 +34,39 @@ pub struct SectionLogs {
 
     /// Send commands to the Commander
     command_tx: Sender<Command>,
+
+    /// Should the source be shown
+    show_source_id: bool,
+
+    /// Should the timestamp be shown
+    show_timestamp: bool,
+
+    /// Timestamp of last received log
+    last_log_ts: LogTimestamp,
 }
 
 impl SectionLogs {
+    pub fn new(command_tx: Sender<Command>) -> SectionLogs {
+        SectionLogs {
+            command_tx,
+            logs: Vec::new(),
+            search_string: String::new(),
+            search_string_log_idx: 0,
+            page_size: 0,
+            sticky: true,
+            vertical_scroll: 0,
+            vertical_scroll_limit: 0,
+            show_source_id: false,
+            show_timestamp: false,
+            last_log_ts: LogTimestamp::now(),
+        }
+    }
+
+    pub fn append_log(&mut self, log: LogMessage) {
+        self.logs.push(log);
+        self.last_log_ts = LogTimestamp::now();
+    }
+
     pub fn clear_logs(&mut self) {
         self.logs.clear();
         self.vertical_scroll = 0;
@@ -104,21 +134,6 @@ impl SectionLogs {
     }
 }
 
-impl SectionLogs {
-    pub fn new(command_tx: Sender<Command>) -> SectionLogs {
-        SectionLogs {
-            command_tx,
-            logs: Vec::new(),
-            search_string: String::new(),
-            search_string_log_idx: 0,
-            page_size: 0,
-            sticky: true,
-            vertical_scroll: 0,
-            vertical_scroll_limit: 0,
-        }
-    }
-}
-
 impl LayoutSection for SectionLogs {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
 
@@ -150,9 +165,28 @@ impl LayoutSection for SectionLogs {
                     ..Default::default()
                 }.add_modifier(style::Modifier::BOLD)
             };
-            log_lines.push(Line::from(log.message.clone()).style(log_style));
+
+            // Optionally prepend timestamp 
+            let ts_string = match self.show_timestamp {
+                true => format!("{} - ", log.timestamp.to_string()),
+                false => String::new(),
+            };
+            
+            // Optionally prepend source id
+            let source_id = match self.show_source_id {
+                true => format!("source_id_{} | ", log.source_id),
+                false => String::new(),
+            };
+
+            // Form message
+            let line = format!("{}{}{}", ts_string, source_id, log.message);
+
+            log_lines.push(Line::from(line).style(log_style));
         }
-        let log_block_title = Line::from("Logs");
+
+        // Calculate timestamp in seconds
+        let ts_dif_sec = LogTimestamp::now().second_count() - self.last_log_ts.second_count();
+        let log_block_title = Line::from(format!("Logs [{:4}]", ts_dif_sec));
         let log_block = Block::default()
             .title(log_block_title)
             .borders(Borders::ALL)
@@ -189,6 +223,14 @@ impl LayoutSection for SectionLogs {
                 self.vertical_scroll = self.vertical_scroll.saturating_sub(self.page_size);
                 self.sticky = false;
             }
+            // Show source id
+            KeyCode::Char('s') => {
+                self.show_source_id = !self.show_source_id;
+            },
+            // Show timestamp
+            KeyCode::Char('t') => {
+                self.show_timestamp = !self.show_timestamp;
+            },
 
             // Clear screent
             KeyCode::Char('C') => {
