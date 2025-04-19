@@ -2,20 +2,23 @@
 
 An opinionated-ish embedded development tool that strives to be the next step in the `picocom` (or alternative) -> `logfile` -> `cat/grep` workflow. People working in many other areas have [fancy](https://log-viewer.opcodes.io/) [things](https://www.logviewplus.com/), but firmware engineers seem to think they have no right to have nice things. Just log the output of the serial port into a file and `grep` onto it, maybe some bash script to add a bit of coloring. **Not on my watch.**
 
-This tool is pretty basic and **will not** do anything you can solve with *ix tools, so do not expect huge integrations out of the box with the propietary toolchain you are using. But being basic means it is easily pluggable: if you use UART you are good to go, and if you use RTT you just need to point to the `.elf` file you are going to flash in the device. Heck you can just open a text file and work with it.
+Be aware that `uberlog` does not intend to be a self contained all-around solution to your workflow, as it would be impossible to handle every specific framework. Thus it will not do anything that can be done with *nix tools, and only supports text-based logging via UART/RTT out of the box. If that is not the case of your project, then you need to use a different program to stream the logs of your device into a text file; `uberlog` can take that file as input and stream logs from it real-time.
 
 # Features
 
-It has some more functionality than the basic log managing:
-- Add filters to modify logs containing certain expressions:
+- It can read logs from three different kinds of source:
+    - UART
+    - RTT
+    - File (real time stream, sort of `tail -f`)
+- As many simultaneous inputs as desired, so multi-MCU communication or server-MCU interaction can be easily understood.
+- Several filtering functionalities:
     - Highlight
-    - Exclude them
-    - Only include them
+    - Exclude logs that contain a given expression
+    - Include only logs that contain a given expression
 - Reset the device
-- Export/import a logfile
+- Stream logs to a file
 - \[soon\] Manage a supported power supply
 - \[soon\] Flash firmware
-- \[soon\] Get logs from several devices at the same time
 
 # Usage
 
@@ -39,15 +42,7 @@ targets:
   probe_id: PROBE_2_SERIAL
 ```
 
-Then you launch the tool from the project folder and it will read the `.gadget.yaml` file to know how to interact with the target. If you do not want to see the logs just use nohup:
-
-```
-$ (nohup uberlog &)
-```
-
-> See? I could have a `--fork` option or whatever, but why reinvent the wheel.
-
-In this specific way, app logs go to /tmp/uberlog_log so if something happens you can check there for issues.
+Then you launch the tool from inside your project folder and it will parse `.gadget.yaml` know how to interact with your devices.
  
 The fields are self explanatory, but note that `name` is whatever you want to name the target in the UI, and `processor` comes from `probe-rs` list of targets [link](https://probe.rs/targets). This means of course that the MCU management (flashing/reset/RTT) side of the project is done by the incredible `probe-rs` [project](https://probe.rs/). Go star it if you did not do it yet.
 
