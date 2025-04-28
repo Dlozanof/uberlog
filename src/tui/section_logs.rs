@@ -1,10 +1,12 @@
-use std::sync::mpsc::Sender;
+use std::{mem::replace, sync::mpsc::Sender};
 
+use color_eyre::owo_colors::OwoColorize;
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::{self, Style}, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
+use ratatui::{layout::Rect, style::{self, Modifier, Style}, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
+use tracing::debug;
 
 use crate::{commander::Command, layout_section::LayoutSection, LogMessage, LogTimestamp};
-
+use ansi_to_tui::IntoText;
 
 enum SearchDirection {
     FOWARD,
@@ -134,6 +136,19 @@ impl SectionLogs {
     }
 }
 
+/// Ratatui tabs and Paragarphs do not play too well together (https://github.com/ratatui/ratatui/issues/876) so for every line
+/// - Replace tabs with 4 spaces (hardcoded)
+/// - Replace `\r\n` to nothing
+/// - Replace `\n` to nothing
+/// - Replace `\r` to nothing
+fn sanitize_log_msg(line: &str) -> String {
+    let line = line.replace("\t", &" ".repeat(4));
+    let line = line.trim_end_matches("\r\n");
+    let line = line.trim_end_matches("\r");
+    let line = line.trim_end_matches("\n");
+    line.to_string()
+}
+
 impl LayoutSection for SectionLogs {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
 
@@ -157,6 +172,8 @@ impl LayoutSection for SectionLogs {
         // Draw ui
         let mut log_lines = Vec::new();
         for (idx, log) in self.logs.iter().enumerate() {
+
+            // Change style if it is the searched-for string
             let log_style = match idx == self.search_string_log_idx && !self.search_string.is_empty() {
                 false => log.style,
                 true =>  Style {
@@ -180,8 +197,30 @@ impl LayoutSection for SectionLogs {
 
             // Form message
             let line = format!("{}{}{}", ts_string, source_id, log.message);
+            debug!("line:\n{:?}", line);
 
-            log_lines.push(Line::from(line).style(log_style));
+            // Sanitize it
+            let sanitized_line = sanitize_log_msg(&line);
+            debug!("sanitized_line:\n{:?}", sanitized_line);
+
+            //// Try with cleaning up
+            //let line_cleaned = strip_ansi_escapes::strip(line);
+            //debug!("line_cleaned:\n{:?}", line_cleaned);
+
+            // Convert ANSI codes to ratatui elements through `into_text`
+            let mut line = sanitized_line.into_text().unwrap().lines[0].clone();
+            
+            // Remove all modifiers so the DIM can be applied, and overwrite colors if highlith
+            // filter applies to the line
+            for internal_span in &mut line.spans {
+                internal_span.style = internal_span.style.remove_modifier(Modifier::all());
+                internal_span.style = internal_span.style.patch(log_style);
+            }
+
+            debug!("processed_line:\n{:?}", line);
+           
+            
+            log_lines.push(line);
         }
 
         // Calculate timestamp in seconds
@@ -191,6 +230,7 @@ impl LayoutSection for SectionLogs {
             .title(log_block_title)
             .borders(Borders::ALL)
             .style(Style::default());
+
         let log_content  = Paragraph::new(log_lines).block(log_block)
             .scroll((self.vertical_scroll as u16, 0));
 

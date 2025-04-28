@@ -395,7 +395,7 @@ impl Commander {
             .collect();
 
         let _ = self.command_response_tx.send(CommandResponse::UpdateLogs(filtered_messages));
-        let _ = self.command_response_tx.send(CommandResponse::TextMessage { message: format!("Added: {:?}", filter) });
+        debug!("Added {:?}", filter);
 
         Ok(())
     }
@@ -412,27 +412,82 @@ impl Commander {
             }
         };
 
+        // Append new bytes
         log_bytes.extend(bytes);
 
-        // Remove ansi colors...
-        log_bytes = strip_ansi_escapes::strip(&log_bytes);
+        // // Remove ansi colors...
+        // log_bytes = strip_ansi_escapes::strip(&log_bytes);
 
-        // ... and remove strange characters
-        log_bytes.retain(|c| c.is_ascii());
+        // // ... and remove strange characters
+        // log_bytes.retain(|c| c.is_ascii());
 
-        // The remaining part should be utf8, so transform it
-        let s = match std::str::from_utf8(&log_bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Invalid UTF-8 sequence: {}", e);
-                return Err("Invalid characters".to_string());
-            }
-        };
+        // // The remaining part should be utf8, so transform it
+        // let s = match std::str::from_utf8(&log_bytes) {
+        //     Ok(v) => v,
+        //     Err(e) => {
+        //         error!("Invalid UTF-8 sequence: {}", e);
+        //         return Err("Invalid characters".to_string());
+        //     }
+        // };
 
         // Get timestamp
         let ts = LogTimestamp::now();
 
         let mut count = 0;
+
+        // Split at every newline
+        for raw_line in log_bytes.split_inclusive(|&c| c == b'\n') {
+            
+            // If current line does not contain '\n' do not process it (is incomplete)
+            if !raw_line.contains(&b'\n') {
+                break;
+            }
+            
+            // Update count of used-up bytes
+            count = count + raw_line.len();
+
+            debug!("Bytes:\n{:?}", raw_line);
+
+            // Clean it up
+            //let raw_line_clean = strip_ansi_escapes::strip(&raw_line);
+            //debug!("Bytes clean:\n{:?}", raw_line_clean);
+
+            let line = match std::str::from_utf8(&raw_line) {
+                Ok(v) => v.to_string(),
+                Err(e) => {
+                    error!("Invalid UTF-8 sequence: {}", e);
+                    return Err("Invalid characters".to_string());
+                }
+            };
+
+            debug!("Line: {}", &line);
+
+            // Store it
+            self.logs_raw.push(LogMessage {
+                timestamp: ts,
+                source_id: id,
+                message: line.clone(),
+                style: Style::default().add_modifier(Modifier::DIM),
+            });
+
+            // If we are streaming logs to a file, add the line to it
+            if let Some(handle) =  &mut self.stream_logs_file_handle {
+                if !self.stream_logs {
+                    error!("Handle not null even though streaming is disabled!!");
+                }
+
+                let _ = handle.write_all(line.as_bytes());
+            }
+
+            // Apply filters
+            if let Some(log_message) = self.apply_filters(ts, id, line.to_string()) {
+                let _ = self.rtt_tx.send(log_message);
+            }
+
+        }
+
+
+        /*
         // Iterate over every line
         for line in s.split_inclusive('\n') {
             if !line.contains('\n') {
@@ -464,6 +519,7 @@ impl Commander {
                 let _ = self.rtt_tx.send(log_message);
             }
         }
+        */
 
         // Let's try to be as ineficient as possible
         let (_, b) = log_bytes.split_at(count);

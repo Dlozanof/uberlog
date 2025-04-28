@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with(
             fmt::layer()
                 .with_writer(log_file)
+                .with_ansi(false)
         )
         .with(tracing_subscriber::filter::EnvFilter::from_default_env());
     tracing::subscriber::set_global_default(subscriber).unwrap();
@@ -113,9 +114,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // setup terminal
     enable_raw_mode()?;
-    let mut stderr = io::stderr(); // This is a special case. Normally using stdout is fine
-    execute!(stderr, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stderr);
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    
+    // create the backend/terminal
+    let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // run it
