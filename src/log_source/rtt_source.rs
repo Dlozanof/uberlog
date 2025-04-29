@@ -1,4 +1,4 @@
-use probe_rs::probe::DebugProbeInfo;
+use probe_rs::{probe::DebugProbeInfo, rtt::{Rtt, ScanRegion}, Permissions};
 use tracing::{error, info, warn, debug};
 
 use crate::commander::{Command, LogBackendInformation, TargetMcu};
@@ -6,10 +6,10 @@ use crate::commander::{Command, LogBackendInformation, TargetMcu};
 use super::LogSourceTrait;
 
 use core::time;
-use std::{io::Read, sync::mpsc::Sender, thread::{self, JoinHandle}};
+use std::{sync::mpsc::Sender, thread::{self, JoinHandle}};
 
 
-pub struct UartSource {
+pub struct RttSource {
 
     /// Handle of the thread reading data
     handle: Option<JoinHandle<()>>,
@@ -36,9 +36,9 @@ pub struct UartSource {
     target_name: String,
 }
 
-impl UartSource {
-    pub fn new(id: u32, mcu_info: TargetMcu, command_tx: Sender<Command>, target_name: String) -> UartSource {
-        UartSource {
+impl RttSource {
+    pub fn new(id: u32, mcu_info: TargetMcu, command_tx: Sender<Command>, target_name: String) -> RttSource {
+        RttSource {
             id,
             mcu_info,
             command_tx,
@@ -56,10 +56,10 @@ impl UartSource {
 }
 
 
-impl LogSourceTrait for UartSource {
+impl LogSourceTrait for RttSource {
     fn connect(&mut self) {
         if self.is_connected {
-            warn!("Already connected ({})", self.mcu_info.name);
+            warn!("Already connected ({})", &self.mcu_info.name);
         }
 
         if self.handle.is_some() || self.thread_control_tx.is_some() {
@@ -67,36 +67,66 @@ impl LogSourceTrait for UartSource {
             self.disconnect();
         }
 
+        // Update RAM state
+        self.is_connected = true;
+
+        // In order to interact with a device using probe-rs a probe/session are needed
+        info!("Opening probe...");
+        let probe = match self.mcu_info.probe_info.open() {
+            Err(e) => {
+                error!("{}", e);
+                return;
+            }
+            Ok(val) => val,
+        };
+
+        info!("Session...");
+        let mut session = match probe.attach(self.mcu_info.mcu.clone(), Permissions::default()) {
+            Err(e) => {
+                error!("{}", e);
+                return;
+            }
+            Ok(val) => val,
+        };
+        let rtt_address = match self.mcu_info.backend {
+            LogBackendInformation::Rtt(addr) => addr,
+            LogBackendInformation::Uart(_,_) => {
+                error!("Trying to connect to RTT a target that uses UART");
+                return;
+            }
+        };
+
         // Create communication channel for sending data to the thread
         let (tx, rx) = std::sync::mpsc::channel();
         self.thread_control_tx = Some(tx);
-
-        // Update RAM state
-        self.is_connected = true;
 
         // Copy data that is to be used by the thread
         let id = self.id;
         let commander_tx = self.command_tx.clone();
         let thread_rx = rx;
-
-        let (dev_path, baud) = match &self.mcu_info.backend {
-            LogBackendInformation::Uart(path, baud) => (path.clone(), *baud),
-            _ => {
-                error!("UART source with RTT backend");
-                return;
-            }
-        };
+        let source_name = self.id_string();
 
         let handle = std::thread::spawn(move || {
 
-            info!("Thread started - UartSource \"{} - {}\"", dev_path, baud);
+            info!("Thread started - RttSource \"{}\"", source_name);
 
-            let mut port = serialport::new(dev_path, baud)
-                .timeout(std::time::Duration::from_secs(1))
-                .open().expect("Failed to open port");
+            // Create the core
+            let mut core = session.core(0).expect("OOPS");
+            info!("Core open");
 
-            info!("Serial port opened");
+            // Attach to RTT
+            let mut rtt = match Rtt::attach_region(&mut core,&ScanRegion::Exact(rtt_address)) {
+                Ok(val) => val,
+                Err(e) => {
+                    error!("Attach region error: {}", e);
+                    return;
+                }
+            };
+            info!("Region attached");
+            info!("There are {} channels", rtt.up_channels().len());
 
+
+            let input = &mut rtt.up_channels()[0];
             loop {
                 // Check no message was received
                 if let Ok(response) = thread_rx.try_recv() {
@@ -108,30 +138,13 @@ impl LogSourceTrait for UartSource {
 
                 // Read as much data as available
                 let mut buf: [u8; 200] = [0; 200];
-                let count = match port.read(buf.as_mut_slice()) {
+                let count = match input.read(&mut core, &mut buf) {
+                    Ok(val) => val,
                     Err(e) => {
-                        // Timeout is expected since we are polling
-                        if e.kind() == std::io::ErrorKind::TimedOut {
-                            continue;
-                        }
-                        
-                        // Broken pipe means the cable was disconnected and an infinite loop
-                        // happens, manage it
-                        if e.kind() == std::io::ErrorKind::BrokenPipe {
-                            error!("Serial port connection error");
-                            let _ = commander_tx.send(Command::DisconnectLogSource(id));
-                            let _ = commander_tx.send(Command::RefreshProbeInfo);
-                            let _ = commander_tx.send(Command::PrintMessage( String::from("Serial port connection error") ));
-                            break;
-                        }
-
-                        // Otherwise report it
                         error!("Port read error: {}", e);
                         let _ = commander_tx.send(Command::PrintMessage(format!("Error reading port {}", e)));
-                        
                         continue;
-                    },
-                    Ok(count) => count,
+                    }
                 };
 
                 // If there is data, clean and send it
@@ -186,7 +199,7 @@ impl LogSourceTrait for UartSource {
     }
     
     fn id_string(&self) -> String {
-        format!("{} (Uart - {})", self.target_name, self.mcu_info.name)
+        format!("{} (RTT - {})", self.target_name, self.mcu_info.name)
     }
 
     fn take_storage(&mut self) -> Option<Vec<u8>> {

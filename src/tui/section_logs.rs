@@ -1,6 +1,5 @@
-use std::{mem::replace, sync::mpsc::Sender};
+use std::sync::mpsc::Sender;
 
-use color_eyre::owo_colors::OwoColorize;
 use crossterm::event::KeyCode;
 use ratatui::{layout::Rect, style::{self, Modifier, Style}, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
 use tracing::debug;

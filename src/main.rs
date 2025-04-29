@@ -1,8 +1,8 @@
-use std::{fs::{OpenOptions}, path::PathBuf, time::Duration};
+use std::{fs::OpenOptions, time::Duration};
 
 use tracing::{error, info, span, Level};
 use tracing_subscriber::{fmt, prelude::*, Registry};
-use uberlog_lib::{command_parser::CommandParser, commander::{add_filter, find_log, open_file, stream_file, stream_start, stream_stop, Command, CommandResponse, Commander}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_probe::SectionProbes}, LogFilter, LogMessage};
+use uberlog_lib::{command_parser::CommandParser, commander::{self, add_filter, Command, Commander, UiCommand}, configuration::{self, ApplicationConfiguration}, layout_section::LayoutSection, tui::{section_filters::SectionFilters, section_logs::SectionLogs, section_sources::SectionSources}, LogMessage};
 
 use tokio::runtime::Runtime;
 use std::sync::mpsc::{Receiver, Sender};
@@ -22,11 +22,11 @@ pub struct App {
     current_screen: CurrentScreen,
     
     pub command_tx: Sender<Command>,
-    pub command_response_rx: Receiver<CommandResponse>,
+    pub command_response_rx: Receiver<UiCommand>,
     pub rtt_data_rx: Receiver<LogMessage>,
 
     // Top section
-    pub section_probes: SectionProbes,
+    pub section_probes: SectionSources,
     pub section_filters: SectionFilters,
 
     // Log section
@@ -50,7 +50,8 @@ pub enum CurrentScreen {
 fn main() -> Result<(), Box<dyn Error>> {
 
     let log_file = OpenOptions::new()
-        .append(true)
+        .write(true)
+        .truncate(true)
         .create(true)
         .open("uberlog.log")
         .unwrap();
@@ -85,11 +86,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut commander = Commander::new(commander_tx.clone(), commander_rx, commander_responwe_tx, rtt_data_tx, target_cfg, &app_cfg);
 
     // Register commands -- File
-    app.command_parser.register_instruction(String::from(":open"), open_file);
-    app.command_parser.register_instruction(String::from(":stream"), stream_file);
-    app.command_parser.register_instruction(String::from(":sstart"), stream_start);
-    app.command_parser.register_instruction(String::from(":sstop"), stream_stop);
-    app.command_parser.register_instruction(String::from(":find"), find_log);
+    app.command_parser.register_instruction(String::from(":stream"), commander::stream_file);
+    app.command_parser.register_instruction(String::from(":sstart"), commander::stream_start);
+    app.command_parser.register_instruction(String::from(":sstop"), commander::stream_stop);
+    // Register commands -- Internal
+    app.command_parser.register_instruction(String::from(":find"), commander::find_log);
     // Register commands -- Filter
     app.command_parser.register_instruction(String::from(":filter"),add_filter);
     
@@ -104,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Ok(_) => (),
                     Err(e) => {
                         error!("Commander error: {}", e);
-                        let _ = commander.command_response_tx.send(CommandResponse::TextMessage{message: "Internal error".to_string()});
+                        let _ = commander.command_response_tx.send(UiCommand::TextMessage{message: "Internal error".to_string()});
                         break;
                     }
                 }
@@ -177,7 +178,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                 
                                 // Switch to Probe view
                                 KeyCode::Char('P') => {
-                                    let _ = app.command_tx.send(Command::GetProbes);
+                                    let _ = app.command_tx.send(Command::RefreshProbeInfo);
                                     app.current_screen = CurrentScreen::Probes;
                                 },
 
@@ -202,7 +203,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 
                                 // Switch to Probe view
                                 KeyCode::Char('P') => {
-                                    let _ = app.command_tx.send(Command::GetProbes);
+                                    let _ = app.command_tx.send(Command::RefreshProbeInfo);
                                     app.current_screen = CurrentScreen::Probes;
                                 },
 
@@ -235,28 +236,32 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                 }
             }
         }
-        
+
         // Check for command responses
         if let Ok(response) = app.command_response_rx.try_recv() {
+            info!("Ui Processing {}", response);
             match response {
-                CommandResponse::ProbeInformation { probes } => {
-                    app.section_probes.targets = probes;
-                },
-                CommandResponse::TextMessage { message } => {
+                UiCommand::TextMessage { message } => {
                     app.command_parser.cancel_parsing();
                     app.message = message;
                 },
-                CommandResponse::UpdateFilterList(filters) => {
+                UiCommand::UpdateFilterList(filters) => {
                     app.section_filters.set_filters(filters);
                 }
-                CommandResponse::UpdateLogs(logs) => {
+                UiCommand::UpdateLogs(logs) => {
                     app.section_logs.update_logs(logs);
                 }
-                CommandResponse::UpdateSearchLog(log) => {
+                UiCommand::UpdateSearchLog(log) => {
                     app.section_logs.update_search_log(log);
                 }
-                CommandResponse::ProbeConnected(is_connected) => {
-                    app.section_probes.set_connected(0, is_connected);
+                UiCommand::AddNewSource(id, display_text) => {
+                    app.section_probes.add_source(id, display_text);
+                }
+                UiCommand::SetConnectionSource(id, is_connected) => {
+                    app.section_probes.set_connected(id, is_connected);
+                }
+                UiCommand::RemoveSource(id) => {
+                    app.section_probes.delete_source(id);
                 }
             }
         }
@@ -309,7 +314,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
 impl App {
 
-    pub fn new(command_tx: Sender<Command>, command_response_rx: Receiver<CommandResponse>, rtt_data_rx: Receiver<LogMessage>, cfg: &ApplicationConfiguration) -> App {
+    pub fn new(command_tx: Sender<Command>, command_response_rx: Receiver<UiCommand>, rtt_data_rx: Receiver<LogMessage>, cfg: &ApplicationConfiguration) -> App {
 
         let aliases = cfg.alias_list.clone();
         App {
@@ -318,11 +323,7 @@ impl App {
             rtt_data_rx,
             current_screen: CurrentScreen::Live,
             section_logs: SectionLogs::new(command_tx.clone()),
-            section_probes: SectionProbes {
-                command_tx: command_tx.clone(),
-                selected_probe: 0,
-                targets: Vec::new(),
-            },
+            section_probes: SectionSources::new(command_tx.clone()),
             section_filters: SectionFilters::new(command_tx.clone()),
             command_parser: CommandParser::new(command_tx, aliases),
             message: String::new(),

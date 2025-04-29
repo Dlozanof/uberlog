@@ -4,6 +4,7 @@ use crossterm::event::KeyCode;
 
 use crate::{commander::Command, configuration::Alias};
 
+
 pub enum State {
     Idle,
     Parsing,

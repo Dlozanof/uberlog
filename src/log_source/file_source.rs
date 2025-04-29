@@ -1,8 +1,8 @@
 use tracing::{error, info, warn, debug};
 
-use crate::commander::{Command, CommandResponse};
+use crate::commander::Command;
 
-use super::log_source::LogSource;
+use super::LogSourceTrait;
 
 use core::time;
 use std::{io::{BufRead, BufReader}, path::PathBuf, sync::mpsc::Sender, thread::{self, JoinHandle}};
@@ -26,11 +26,14 @@ pub struct FileSource {
     file_name: String,
 
     /// Identifier of this source
-    id: i32,
+    id: u32,
+
+    /// Log processing storage
+    storage: Option<Vec<u8>>,
 }
 
 impl FileSource {
-    pub fn new(id: i32, file_name: String, command_tx: Sender<Command>) -> FileSource {
+    pub fn new(id: u32, file_name: String, command_tx: Sender<Command>) -> FileSource {
         FileSource {
             handle: None,
             thread_control_tx: None,
@@ -38,11 +41,12 @@ impl FileSource {
             file_name,
             is_connected: false,
             id,
+            storage: None,
         }
     }
 }
 
-impl LogSource for FileSource {
+impl LogSourceTrait for FileSource {
     fn connect(&mut self) {
 
         // Validate status
@@ -72,11 +76,14 @@ impl LogSource for FileSource {
 
         let _ = command_tx.send(Command::PrintMessage( format!("Streaming from `{}`", self.file_name) ));
 
+        // Copy data for the thread to use
         let id = self.id;
+        let file_name = self.file_name.clone();
+        
         // Define the thread
         let handle = std::thread::spawn(move || {
 
-            info!("Thread started - FileSource");
+            info!("Thread started - FileSource \"{}\" (ID {})", file_name, id);
 
             loop {
                 // Check no message was received
@@ -121,5 +128,43 @@ impl LogSource for FileSource {
         self.handle = Some(handle);
     }
 
-    fn disconnect() {}
+    fn disconnect(&mut self) {
+        info!("Disconnecting {}", self.file_name);
+
+        if let Some(channel) = self.thread_control_tx.take() {
+            match channel.send(false) {
+                Ok(_) => (),
+                Err(e) => error!("{:?}", e),
+            }
+        } else {
+            error!("Thread control channel is None");
+        }
+
+        // Wait for the thread to die, and remove the session
+        if let Some(t_handle) = self.handle.take() {
+            match t_handle.join() {
+                Ok(_) => (),
+                Err(e) => error!("{:?}", e),
+            }            
+        } else {
+            error!("Thread handle is None");
+        }
+    }
+
+    fn id_eq(&self, id: u32) -> bool {
+        self.id == id
+    }
+    
+    fn id_string(&self) -> String {
+        format!("Stream ({})", self.file_name)
+    }
+
+    fn take_storage(&mut self) -> Option<Vec<u8>> {
+        self.storage.take()
+    }
+
+    fn set_storage(&mut self, bytes: Vec<u8>) {
+        self.storage = Some(bytes);
+    }
+
 }
