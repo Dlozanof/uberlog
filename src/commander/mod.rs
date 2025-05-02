@@ -308,8 +308,6 @@ impl Commander {
     }
 
     fn cmd_parse_bytes(&mut self, id: u32, bytes: Vec<u8>) -> Result<(), String> {
-        debug!("Received <-- {:?} -->", bytes);
-
         // Get current bytes
         let idx = match self.get_source_idx(id) {
             Some(idx) => idx,
@@ -325,7 +323,13 @@ impl Commander {
         };
 
         // Append new bytes
+        let bytes_len = bytes.len();
         log_bytes.extend(bytes);
+
+        // Remove zeros
+        log_bytes.retain(|&b| b != 0);
+
+        debug!("Received {} bytes. Current storage state:\n{:?}", bytes_len, log_bytes);
 
         // Get timestamp
         let ts = LogTimestamp::now();
