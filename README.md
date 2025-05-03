@@ -118,6 +118,7 @@ Keybindings:
 - `c`onnect : start reading logs from the probe
 - `d`isconnect : stop reading longs from the probe
 - `r`efresh : refresh the list of detected probes
+- `R`eset : issue a reset to the target
 
 ### Filter view
 
