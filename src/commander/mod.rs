@@ -481,7 +481,7 @@ impl Commander {
                     },
                     LogBackend::Uart{dev: _, baud: _} => {
                         // Create the log source
-                        let new_source = UartSource::new(id, new_target, self.command_tx.clone(), self.probes.last().unwrap().name.clone());                    
+                        let new_source = UartSource::new(id, new_target, self.command_tx.clone());
                         // Store it
                         self.log_sources.push(LogSource::UartSource(new_source));
                     }
