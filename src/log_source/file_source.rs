@@ -165,6 +165,10 @@ impl LogSourceTrait for FileSource {
         self.id == id
     }
 
+    fn id(&self) -> u32 {
+        self.id
+    }
+
     fn id_string(&self) -> String {
         format!("Stream ({})", self.file_name)
     }

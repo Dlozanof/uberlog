@@ -115,7 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .register_instruction(String::from(":find"), commander::find_log);
     // Register commands -- Filter
     app.command_parser
-        .register_instruction(String::from(":filter"), add_filter);
+        .register_instruction(String::from(":filter"), commander::add_filter);
 
     // Commander main loop
     let rt = Runtime::new().expect("Unable to create Runtime");

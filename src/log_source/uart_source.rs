@@ -187,6 +187,10 @@ impl LogSourceTrait for UartSource {
         self.id == id
     }
 
+    fn id(&self) -> u32 {
+        self.id
+    }
+
     fn id_string(&self) -> String {
         self.mcu_info.name.clone()
     }

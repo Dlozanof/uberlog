@@ -6,6 +6,7 @@ pub trait LogSourceTrait {
     fn connect(&mut self);
     fn disconnect(&mut self);
     fn id_eq(&self, id: u32) -> bool;
+    fn id(&self) -> u32;
     fn id_string(&self) -> String;
     fn take_storage(&mut self) -> Option<Vec<u8>>;
     fn set_storage(&mut self, bytes: Vec<u8>);
@@ -37,6 +38,13 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.id_eq(id),
             LogSource::UartSource(s) => s.id_eq(id),
             LogSource::RttSource(s) => s.id_eq(id),
+        }
+    }
+    fn id(&self) -> u32 {
+        match self {
+            LogSource::FileSource(s) => s.id(),
+            LogSource::UartSource(s) => s.id(),
+            LogSource::RttSource(s) => s.id(),
         }
     }
     fn id_string(&self) -> String {

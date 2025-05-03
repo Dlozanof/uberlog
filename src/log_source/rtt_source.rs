@@ -36,9 +36,6 @@ pub struct RttSource {
 
     /// Log processing storage
     storage: Option<Vec<u8>>,
-
-    /// Name of the target
-    target_name: String,
 }
 
 impl RttSource {
@@ -46,13 +43,11 @@ impl RttSource {
         id: u32,
         mcu_info: TargetMcu,
         command_tx: Sender<Command>,
-        target_name: String,
     ) -> RttSource {
         RttSource {
             id,
             mcu_info,
             command_tx,
-            target_name,
             handle: None,
             thread_control_tx: None,
             is_connected: false,
@@ -182,7 +177,7 @@ impl LogSourceTrait for RttSource {
     }
 
     fn disconnect(&mut self) {
-        info!("Disconnecting {}", self.target_name);
+        info!("Disconnecting {}", self.mcu_info.name);
 
         if let Some(channel) = self.thread_control_tx.take() {
             match channel.send(false) {
@@ -208,8 +203,12 @@ impl LogSourceTrait for RttSource {
         self.id == id
     }
 
+    fn id(&self) -> u32 {
+        self.id
+    }
+
     fn id_string(&self) -> String {
-        format!("{} (RTT - {})", self.target_name, self.mcu_info.name)
+        self.mcu_info.name.clone()
     }
 
     fn take_storage(&mut self) -> Option<Vec<u8>> {

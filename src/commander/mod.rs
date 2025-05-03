@@ -5,24 +5,23 @@ use std::{
 };
 
 use crate::{
-    LogFilter, LogFilterType, LogMessage, LogTimestamp,
+    LogFilter, LogMessage, LogTimestamp,
     configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration},
     log_source::{LogSource, LogSourceTrait, RttSource, UartSource},
 };
 use elf::{ElfBytes, endian::AnyEndian};
 use probe_rs::probe::{DebugProbeInfo, list::Lister};
-use ratatui::style::{self, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use tracing::{debug, error, info, warn};
 
 mod file_io;
 mod source_handler;
 mod user_commands;
+mod filter_handler;
 pub use user_commands::{find_log, stream_file, stream_start, stream_stop};
+pub use filter_handler::add_filter;
 
 pub struct Commander {
-    /// Connected target information
-    pub probes: Vec<TargetMcu>,
-
     /// Connected target information
     log_sources: Vec<LogSource>,
 
@@ -31,10 +30,14 @@ pub struct Commander {
 
     /// Log filtering feature
     filters: Vec<LogFilter>,
-    logs_raw: Vec<LogMessage>,
 
-    /// Configuration
+    /// All received log messages
+    log_messages: Vec<LogMessage>,
+
+    /// Target configuration (from .gadget.yaml)
     pub target_cfg: TargetConfiguration,
+
+    /// Application configuration (from ~/.config/uberlog/config.yaml)
     pub app_cfg: ApplicationConfiguration,
 
     /// Log streaming information
@@ -43,14 +46,15 @@ pub struct Commander {
 
     /// Command input
     pub command_rx: Receiver<Command>,
-    /// Command output (provided to thread creates by Commander)
+
+    /// Command output (provided to threads created by Commander)
     pub command_tx: Sender<Command>,
 
-    /// Command response output (to send response to other modules)
+    /// Command response output (to send response to the TUI)
     pub command_response_tx: Sender<UiCommand>,
 
-    // Store the rtt_tx channel for cloning purposes, will not use it directly
-    pub rtt_tx: Sender<LogMessage>,
+    /// Channel TX for sending parsed log messages
+    pub log_message_tx: Sender<LogMessage>,
 }
 
 pub enum Command {
@@ -79,6 +83,7 @@ pub enum Command {
     ClearLogs,
     FindLog(String),
 }
+
 impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
@@ -152,16 +157,15 @@ pub enum LogBackendInformation {
 pub struct TargetMcu {
     /// Name of the target, coming from a configuration file
     pub name: String,
+
     /// State of the debug probe attached to the target
     pub probe_info: DebugProbeInfo,
+
     /// MCU name, must be compatible with probe-rs
     pub mcu: String,
 
     /// Details about the log backend used by the target
     pub backend: LogBackendInformation,
-
-    /// Associated log source ID
-    log_source_id: u32,
 }
 
 impl Commander {
@@ -178,27 +182,20 @@ impl Commander {
         app_cfg: &ApplicationConfiguration,
     ) -> Commander {
         let mut ret = Commander {
-            probes: Vec::new(),
             log_sources: Vec::new(),
             log_source_id: 0,
             filters: Vec::new(),
-            logs_raw: Vec::new(),
+            log_messages: Vec::new(),
             target_cfg: cfg,
             app_cfg: app_cfg.clone(),
             command_rx,
             command_tx,
             command_response_tx,
-            rtt_tx,
+            log_message_tx: rtt_tx,
             stream_logs: false,
             stream_logs_file_handle: None,
         };
         let _ = ret.cmd_refresh_probe_info();
-        ret
-    }
-
-    fn get_new_source_id(&mut self) -> u32 {
-        let ret = self.log_source_id;
-        self.log_source_id = self.log_source_id + 1;
         ret
     }
 
@@ -273,59 +270,19 @@ impl Commander {
     ///
     /// Remove all stored logs and request a clear also to the UI
     fn clear_logs(&mut self) -> Result<(), String> {
-        self.logs_raw.clear();
+        self.log_messages.clear();
         let _ = self
             .command_response_tx
             .send(UiCommand::UpdateLogs(Vec::new()));
         Ok(())
     }
 
-    /// Clear filters
-    ///
-    /// Clear the available filters, and reprocess the log messages
-    fn clear_filters(&mut self) -> Result<(), String> {
-        // Clear filters
-        self.filters.clear();
 
-        // Empty current log list
-        let filtered_messages: Vec<LogMessage> = self
-            .logs_raw
-            .iter()
-            .map(|msg| self.apply_filters(msg.timestamp, msg.source_id, msg.message.to_string()))
-            .map(|msg| msg.unwrap())
-            .collect();
-
-        let _ = self
-            .command_response_tx
-            .send(UiCommand::UpdateLogs(filtered_messages));
-        Ok(())
-    }
-
-    /// Add a new filter
-    ///
-    /// Not only store the new filter, but also regenerate the filtered log list and send it to the
-    /// application so it can update the log view
-    fn add_filter(&mut self, filter: LogFilter) -> Result<(), String> {
-        // Add new filter
-        self.filters.push(filter.clone());
-
-        // Empty current log list
-        let filtered_messages: Vec<LogMessage> = self
-            .logs_raw
-            .iter()
-            .map(|msg| self.apply_filters(msg.timestamp, msg.source_id, msg.message.to_string()))
-            .filter(|msg| msg.is_some())
-            .map(|msg| msg.unwrap())
-            .collect();
-
-        let _ = self
-            .command_response_tx
-            .send(UiCommand::UpdateLogs(filtered_messages));
-        debug!("Added {:?}", filter);
-
-        Ok(())
-    }
-
+    /// Process received bytes from the different log sources
+    /// 
+    /// Low level function, it's purpose is to receive raw bytes from all the log sources and
+    /// process them into log messages (strings). It also applies all the defined filters and
+    /// let's the UI know that a new message has been received.
     fn cmd_parse_bytes(&mut self, id: u32, bytes: Vec<u8>) -> Result<(), String> {
         // Get current bytes
         let idx = match self.get_source_idx(id) {
@@ -388,7 +345,7 @@ impl Commander {
             debug!("Line: {}", &line);
 
             // Store it
-            self.logs_raw.push(LogMessage {
+            self.log_messages.push(LogMessage {
                 timestamp: ts,
                 source_id: id as i32,
                 message: line.clone(),
@@ -406,7 +363,7 @@ impl Commander {
 
             // Apply filters
             if let Some(log_message) = self.apply_filters(ts, id as i32, line.to_string()) {
-                let _ = self.rtt_tx.send(log_message);
+                let _ = self.log_message_tx.send(log_message);
             }
         }
 
@@ -469,11 +426,18 @@ impl Commander {
                 .next()
             {
                 // Get current list of probe serial ids
-                let current_serials: Vec<String> = self
-                    .probes
-                    .iter()
-                    .map(|t| t.probe_info.serial_number.clone().unwrap())
-                    .collect();
+                let mut current_serials: Vec<String> = Vec::new();
+                for source in &mut self.log_sources {
+                    match source {
+                        LogSource::FileSource(_) => (),
+                        LogSource::RttSource(s) => {
+                            current_serials.push(s.get_probe_state().serial_number.clone().unwrap());
+                        },
+                        LogSource::UartSource(s) => {
+                            current_serials.push(s.get_probe_state().serial_number.clone().unwrap());
+                        }                            
+                    }
+                }
 
                 // If new one is already present, skip further steps
                 if let Some(probe_serial) = &probe.serial_number {
@@ -494,22 +458,13 @@ impl Commander {
                             LogBackendInformation::Uart(dev.clone(), *baud)
                         }
                     },
-                    log_source_id: id,
                 };
-
-                // Otherwise add it
-                self.probes.push(new_target.clone());
 
                 // Also add the log source
                 match &target.log_backend {
                     LogBackend::Rtt { elf_path: _ } => {
                         // Create the log source
-                        let new_source = RttSource::new(
-                            id,
-                            new_target,
-                            self.command_tx.clone(),
-                            self.probes.last().unwrap().name.clone(),
-                        );
+                        let new_source = RttSource::new(id, new_target, self.command_tx.clone());
                         // Store it
                         self.log_sources.push(LogSource::RttSource(new_source));
                     }
@@ -528,26 +483,34 @@ impl Commander {
             }
         }
 
+        // Get current available probe serials
         let available_probes_serials: Vec<String> = lister
             .list_all()
             .iter()
             .map(|t| t.serial_number.clone().expect("No serial!"))
             .collect();
-        self.probes.retain(|probe| {
-            // Keep the ones whose serial is within available ones
-            if available_probes_serials.contains(&probe.probe_info.serial_number.clone().unwrap()) {
-                true
-            // Remove the rest (disconnect first)
-            } else {
-                let _ = self
-                    .command_tx
-                    .send(Command::DisconnectLogSource(probe.log_source_id));
+
+        // And remove the log sources that are not available anymore
+        for i in 0..self.log_sources.len() {
+            let keep_source = match &mut self.log_sources[i] {
+                LogSource::FileSource(_) => true,
+                LogSource::RttSource(s) => {
+                    available_probes_serials.contains(s.get_probe_state().serial_number.as_ref().unwrap())
+                },
+                LogSource::UartSource(s) => {
+                    available_probes_serials.contains(s.get_probe_state().serial_number.as_ref().unwrap())
+                }
+            };
+
+            if !keep_source {
+                self.log_sources[i].disconnect();
+
                 let _ = self
                     .command_response_tx
-                    .send(UiCommand::RemoveSource(probe.log_source_id));
-                false
+                    .send(UiCommand::RemoveSource(self.log_sources[i].id()));
             }
-        });
+        }
+
 
         Ok(())
     }
@@ -586,116 +549,4 @@ impl Commander {
         Err(String::new())
     }
 
-    /// Apply filters to a log message
-    fn apply_filters(&self, timestamp: LogTimestamp, id: i32, log: String) -> Option<LogMessage> {
-        let mut log = Some(LogMessage {
-            timestamp: timestamp.clone(),
-            style: Style::default().add_modifier(Modifier::DIM),
-            message: log,
-            source_id: id,
-        });
-
-        for current_filter in &self.filters {
-            if log.is_none() {
-                return log;
-            }
-            match current_filter.kind {
-                LogFilterType::Inclusion => {
-                    let tmp_log = log.clone().unwrap();
-                    let retain_it = tmp_log.message.contains(&current_filter.msg)
-                        && !current_filter.msg.is_empty();
-                    if retain_it {
-                        continue;
-                    } else {
-                        log = None;
-                    }
-                }
-                LogFilterType::Exclusion => {
-                    let tmp_log = log.clone().unwrap();
-                    let retain_it = !tmp_log.message.contains(&current_filter.msg)
-                        && !current_filter.msg.is_empty();
-                    if retain_it {
-                        continue;
-                    } else {
-                        log = None;
-                    }
-                }
-                LogFilterType::Highlighter => {
-                    let tmp_log = log.clone().unwrap();
-                    let matches_msg = tmp_log.message.contains(&current_filter.msg)
-                        && !current_filter.msg.is_empty();
-                    if matches_msg {
-                        log = Some(LogMessage {
-                            timestamp: timestamp.clone(),
-                            message: log.unwrap().message,
-                            style: current_filter.style,
-                            source_id: id,
-                        });
-                    }
-                }
-            }
-        }
-        log
-    }
-}
-
-/// Add filter callback
-///
-/// Add a filter by parsing the `input` field. It has the general form:
-/// {h/i/e} (optional)color word
-///
-/// Examples:
-///     h red wrn -> add highlight filter (color red) for lines containing "wrn"
-///     i tempo -> add inclusion filter for lines containing "tempo"
-///     e tempo -> add exclusion filter for lines containing "tempo"
-pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
-    if input.is_empty() {
-        return Err(String::from("Filter information missing"));
-    }
-
-    if input.len() < 2 {
-        return Err(String::from(
-            "Wrong arguments. Expected \'/{h,i,e} {color} word\'",
-        ));
-    }
-
-    let mut idx = 0;
-
-    let kind = match input[idx].chars().next() {
-        Some('h') => LogFilterType::Highlighter,
-        Some('i') => LogFilterType::Inclusion,
-        Some('e') => LogFilterType::Exclusion,
-        _ => {
-            return Err("Wrong argument".to_owned());
-        }
-    };
-    idx = idx + 1;
-
-    // Inclusion/exclusion do not change color
-    let mut color = style::Color::Blue;
-    if input.len() == 3 {
-        match input[idx].as_str() {
-            "red" => color = style::Color::Red,
-            "green" => color = style::Color::Green,
-            "yellow" => color = style::Color::Yellow,
-            "white" => color = style::Color::White,
-            "blue" => color = style::Color::Blue,
-            "magenta" => color = style::Color::Magenta,
-            _ => (),
-        }
-        idx = idx + 1;
-    }
-
-    let filter_style = Style {
-        fg: Some(color),
-        ..Default::default()
-    };
-
-    let _ = sender.send(Command::AddFilter(LogFilter {
-        style: filter_style,
-        kind,
-        msg: input[idx].clone(),
-    }));
-
-    Ok(())
 }

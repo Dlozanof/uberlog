@@ -45,7 +45,7 @@ impl Commander {
 
             // Otherwise open file
             if let Ok(mut p) = std::fs::File::create(&path) {
-                for log in &self.logs_raw {
+                for log in &self.log_messages {
                     let _ = p.write_all(log.message.as_bytes());
                 }
                 self.stream_logs_file_handle = Some(p);
