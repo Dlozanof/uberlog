@@ -1,5 +1,4 @@
-use ratatui::{layout::Rect, Frame};
-
+use ratatui::{Frame, layout::Rect};
 
 pub trait LayoutSection {
     /// Draw the rectangle

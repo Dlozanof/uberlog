@@ -1,10 +1,16 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::{self, Modifier, Style}, text::Line, widgets::{Block, Borders, Paragraph}, Frame};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{self, Modifier, Style},
+    text::Line,
+    widgets::{Block, Borders, Paragraph},
+};
 use tracing::debug;
 
-use crate::{commander::Command, layout_section::LayoutSection, LogMessage, LogTimestamp};
+use crate::{LogMessage, LogTimestamp, commander::Command, layout_section::LayoutSection};
 use ansi_to_tui::IntoText;
 
 enum SearchDirection {
@@ -13,10 +19,9 @@ enum SearchDirection {
 }
 
 pub struct SectionLogs {
-
     /// Log offset
     pub vertical_scroll: usize,
-    
+
     /// Maximum offset
     vertical_scroll_limit: usize,
 
@@ -83,17 +88,21 @@ impl SectionLogs {
     }
 
     /// Search a log containing the search_string text
-    /// 
+    ///
     /// If the search_string is empty, the search is disabled
     fn find_log(&mut self, log: String, direction: SearchDirection) {
-
         // If search_string_log_idx is not within view, update it
-        if self.search_string_log_idx < self.vertical_scroll || self.search_string_log_idx > (self.vertical_scroll + self.page_size) {
+        if self.search_string_log_idx < self.vertical_scroll
+            || self.search_string_log_idx > (self.vertical_scroll + self.page_size)
+        {
             self.search_string_log_idx = self.vertical_scroll;
         }
 
-        let start_idx = match direction{
-            SearchDirection::FOWARD => self.search_string_log_idx.saturating_add(1).min(self.logs.len() - 1),
+        let start_idx = match direction {
+            SearchDirection::FOWARD => self
+                .search_string_log_idx
+                .saturating_add(1)
+                .min(self.logs.len() - 1),
             SearchDirection::BACKWARD => self.search_string_log_idx.saturating_sub(1),
         };
 
@@ -110,11 +119,9 @@ impl SectionLogs {
             return;
         }
 
-        
         let mut i = start_idx;
         while i != end_idx {
             if self.logs[i].message.contains(&log) {
-
                 self.search_string_log_idx = i;
 
                 let offset = self.page_size / 2;
@@ -122,14 +129,14 @@ impl SectionLogs {
                     true => i,
                     false => offset,
                 };
-                
+
                 self.vertical_scroll = self.search_string_log_idx - offset;
                 break;
             }
 
             i = match direction {
                 SearchDirection::FOWARD => i.saturating_add(1).min(self.logs.len() - 1),
-                SearchDirection::BACKWARD => i.saturating_sub(1),                
+                SearchDirection::BACKWARD => i.saturating_sub(1),
             }
         }
     }
@@ -150,7 +157,6 @@ fn sanitize_log_msg(line: &str) -> String {
 
 impl LayoutSection for SectionLogs {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
-
         // Update scroll limit value (+2 to take into account borders)
         if area.height as usize <= self.logs.len() {
             self.vertical_scroll_limit = 2 + self.logs.len() - area.height as usize;
@@ -171,23 +177,24 @@ impl LayoutSection for SectionLogs {
         // Draw ui
         let mut log_lines = Vec::new();
         for (idx, log) in self.logs.iter().enumerate() {
-
             // Change style if it is the searched-for string
-            let log_style = match idx == self.search_string_log_idx && !self.search_string.is_empty() {
-                false => log.style,
-                true =>  Style {
-                    fg: log.style.bg,
-                    bg: log.style.fg,
-                    ..Default::default()
-                }.add_modifier(style::Modifier::BOLD)
-            };
+            let log_style =
+                match idx == self.search_string_log_idx && !self.search_string.is_empty() {
+                    false => log.style,
+                    true => Style {
+                        fg: log.style.bg,
+                        bg: log.style.fg,
+                        ..Default::default()
+                    }
+                    .add_modifier(style::Modifier::BOLD),
+                };
 
-            // Optionally prepend timestamp 
+            // Optionally prepend timestamp
             let ts_string = match self.show_timestamp {
                 true => format!("{} - ", log.timestamp.to_string()),
                 false => String::new(),
             };
-            
+
             // Optionally prepend source id
             let source_id = match self.show_source_id {
                 true => format!("source_id_{} | ", log.source_id),
@@ -208,7 +215,7 @@ impl LayoutSection for SectionLogs {
 
             // Convert ANSI codes to ratatui elements through `into_text`
             let mut line = sanitized_line.into_text().unwrap().lines[0].clone();
-            
+
             // Remove all modifiers so the DIM can be applied, and overwrite colors if highlith
             // filter applies to the line
             for internal_span in &mut line.spans {
@@ -217,8 +224,7 @@ impl LayoutSection for SectionLogs {
             }
 
             debug!("processed_line:\n{:?}", line);
-           
-            
+
             log_lines.push(line);
         }
 
@@ -230,19 +236,22 @@ impl LayoutSection for SectionLogs {
             .borders(Borders::ALL)
             .style(Style::default());
 
-        let log_content  = Paragraph::new(log_lines).block(log_block)
+        let log_content = Paragraph::new(log_lines)
+            .block(log_block)
             .scroll((self.vertical_scroll as u16, 0));
 
         // Render
         frame.render_widget(log_content, area);
-
     }
 
     fn process_key(&mut self, key: crossterm::event::KeyCode) {
         match key {
             // Movement
             KeyCode::Char('j') | KeyCode::Down => {
-                self.vertical_scroll = self.vertical_scroll.saturating_add(1).min(self.vertical_scroll_limit);
+                self.vertical_scroll = self
+                    .vertical_scroll
+                    .saturating_add(1)
+                    .min(self.vertical_scroll_limit);
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.vertical_scroll = self.vertical_scroll.saturating_sub(1);
@@ -253,10 +262,16 @@ impl LayoutSection for SectionLogs {
                 self.sticky = false;
             }
             KeyCode::PageDown => {
-                self.vertical_scroll = self.vertical_scroll.saturating_add(self.page_size).min(self.vertical_scroll_limit);
+                self.vertical_scroll = self
+                    .vertical_scroll
+                    .saturating_add(self.page_size)
+                    .min(self.vertical_scroll_limit);
             }
             KeyCode::End | KeyCode::Char('G') => {
-                self.vertical_scroll = self.vertical_scroll.saturating_add(self.vertical_scroll_limit).min(self.vertical_scroll_limit);
+                self.vertical_scroll = self
+                    .vertical_scroll
+                    .saturating_add(self.vertical_scroll_limit)
+                    .min(self.vertical_scroll_limit);
             }
             KeyCode::PageUp => {
                 self.vertical_scroll = self.vertical_scroll.saturating_sub(self.page_size);
@@ -265,16 +280,16 @@ impl LayoutSection for SectionLogs {
             // Show source id
             KeyCode::Char('s') => {
                 self.show_source_id = !self.show_source_id;
-            },
+            }
             // Show timestamp
             KeyCode::Char('t') => {
                 self.show_timestamp = !self.show_timestamp;
-            },
+            }
 
             // Clear screent
             KeyCode::Char('C') => {
                 let _ = self.command_tx.send(Command::ClearLogs);
-            },
+            }
 
             // Search log
             KeyCode::Char('n') => {
@@ -289,10 +304,9 @@ impl LayoutSection for SectionLogs {
                     self.sticky = false;
                 }
             }
-            _ => ()
+            _ => (),
         }
     }
-
 
     fn min_lines(&self) -> usize {
         return self.logs.len().min(1);

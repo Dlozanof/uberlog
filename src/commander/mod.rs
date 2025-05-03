@@ -1,18 +1,25 @@
-use std::{fmt, io::Write, sync::mpsc::{Receiver, Sender}};
+use std::{
+    fmt,
+    io::Write,
+    sync::mpsc::{Receiver, Sender},
+};
 
-use elf::{endian::AnyEndian, ElfBytes};
-use probe_rs::probe::{list::Lister, DebugProbeInfo};
+use crate::{
+    LogFilter, LogFilterType, LogMessage, LogTimestamp,
+    configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration},
+    log_source::{LogSource, LogSourceTrait, RttSource, UartSource},
+};
+use elf::{ElfBytes, endian::AnyEndian};
+use probe_rs::probe::{DebugProbeInfo, list::Lister};
 use ratatui::style::{self, Modifier, Style};
 use tracing::{debug, error, info, warn};
-use crate::{configuration::{ApplicationConfiguration, LogBackend, TargetConfiguration}, log_source::{LogSource, LogSourceTrait, RttSource, UartSource}, LogFilter, LogFilterType, LogMessage, LogTimestamp};
 
-mod source_handler;
 mod file_io;
+mod source_handler;
 mod user_commands;
 pub use user_commands::{find_log, stream_file, stream_start, stream_stop};
 
 pub struct Commander {
-
     /// Connected target information
     pub probes: Vec<TargetMcu>,
 
@@ -43,11 +50,10 @@ pub struct Commander {
     pub command_response_tx: Sender<UiCommand>,
 
     // Store the rtt_tx channel for cloning purposes, will not use it directly
-    pub rtt_tx: Sender<LogMessage>
+    pub rtt_tx: Sender<LogMessage>,
 }
 
 pub enum Command {
-
     // File
     StreamFile(String),
     StreamLogs(bool, String),
@@ -75,7 +81,6 @@ pub enum Command {
 }
 impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
         let text = match self {
             Command::ClearLogs => "ClearLogs",
             Command::GetFilters => "GetFilters",
@@ -95,11 +100,11 @@ impl fmt::Display for Command {
     }
 }
 
-
-
 pub enum UiCommand {
     /// Misc
-    TextMessage{message: String},
+    TextMessage {
+        message: String,
+    },
 
     /// Sources
     AddNewSource(u32 /* ID */, String /* Text to display */),
@@ -116,9 +121,8 @@ pub enum UiCommand {
 
 impl fmt::Display for UiCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
         let text = match self {
-            UiCommand::TextMessage{message: _} => "TextMessage",
+            UiCommand::TextMessage { message: _ } => "TextMessage",
             UiCommand::AddNewSource(_, _) => "AddNewSource",
             UiCommand::SetConnectionSource(_, _) => "SetConnectionSource",
             UiCommand::UpdateFilterList(_) => "UpdateFilterList",
@@ -130,9 +134,8 @@ impl fmt::Display for UiCommand {
     }
 }
 
-
 /// Read-only information for log backend
-/// 
+///
 /// This enum used in TargetInformation to provide details about the kind of logging backend
 /// the target uses.
 #[derive(Clone)]
@@ -141,9 +144,8 @@ pub enum LogBackendInformation {
     Uart(String, u32),
 }
 
-
 /// This class holds the whole state of a target MCU
-/// 
+///
 /// Entrypoint to operating with an MCU from other parts of the code, one per
 /// target connected to the system.
 #[derive(Clone)]
@@ -162,13 +164,19 @@ pub struct TargetMcu {
     log_source_id: u32,
 }
 
-
 impl Commander {
     /// Create a new Commander
-    /// 
+    ///
     /// Intended to be used in the beginning of the aplication, to create the single commander that
     /// will handle all the connected probes and related targets
-    pub fn new(command_tx: Sender<Command>, command_rx: Receiver<Command>, command_response_tx: Sender<UiCommand>, rtt_tx: Sender<LogMessage>, cfg: TargetConfiguration, app_cfg: &ApplicationConfiguration) -> Commander {
+    pub fn new(
+        command_tx: Sender<Command>,
+        command_rx: Receiver<Command>,
+        command_response_tx: Sender<UiCommand>,
+        rtt_tx: Sender<LogMessage>,
+        cfg: TargetConfiguration,
+        app_cfg: &ApplicationConfiguration,
+    ) -> Commander {
         let mut ret = Commander {
             probes: Vec::new(),
             log_sources: Vec::new(),
@@ -195,7 +203,7 @@ impl Commander {
     }
 
     /// Process incoming commands
-    /// 
+    ///
     /// Core of this module, this function is designed in a way that a thread is to be calling it periodically
     /// forever. It will block waiting for commands and then process them as required.
     pub fn process(&mut self) -> Result<(), String> {
@@ -207,7 +215,7 @@ impl Commander {
                 }
                 Command::Reset(source_id) => {
                     return self.cmd_reset(source_id);
-                },
+                }
                 Command::StreamLogs(streaming, path) => {
                     return self.cmd_log_stream(streaming, path);
                 }
@@ -218,7 +226,9 @@ impl Commander {
                     return self.cmd_stream_file(path);
                 }
                 Command::PrintMessage(msg) => {
-                    let _ = self.command_response_tx.send(UiCommand::TextMessage { message: msg });
+                    let _ = self
+                        .command_response_tx
+                        .send(UiCommand::TextMessage { message: msg });
                 }
                 Command::AddFilter(filter) => {
                     return self.add_filter(filter);
@@ -227,7 +237,9 @@ impl Commander {
                     return self.clear_filters();
                 }
                 Command::GetFilters => {
-                    let _ = self.command_response_tx.send(UiCommand::UpdateFilterList(self.filters.clone()));
+                    let _ = self
+                        .command_response_tx
+                        .send(UiCommand::UpdateFilterList(self.filters.clone()));
                 }
                 Command::ClearLogs => {
                     return self.clear_logs();
@@ -242,8 +254,7 @@ impl Commander {
                     return self.disconnect_log_source(id);
                 }
             }
-        }
-        else {
+        } else {
             error!("Channel broke, stop further processing");
             return Err(String::from("channel broken"));
         }
@@ -252,56 +263,64 @@ impl Commander {
 
     /// Change the log being searched for
     fn update_log_search(&self, log: String) -> Result<(), String> {
-        let _ = self.command_response_tx.send(UiCommand::UpdateSearchLog(log));
+        let _ = self
+            .command_response_tx
+            .send(UiCommand::UpdateSearchLog(log));
         Ok(())
     }
 
     /// Clear logs
-    /// 
+    ///
     /// Remove all stored logs and request a clear also to the UI
     fn clear_logs(&mut self) -> Result<(), String> {
         self.logs_raw.clear();
-        let _ = self.command_response_tx.send(UiCommand::UpdateLogs(Vec::new()));
+        let _ = self
+            .command_response_tx
+            .send(UiCommand::UpdateLogs(Vec::new()));
         Ok(())
     }
 
     /// Clear filters
-    /// 
+    ///
     /// Clear the available filters, and reprocess the log messages
     fn clear_filters(&mut self) -> Result<(), String> {
-        
         // Clear filters
         self.filters.clear();
 
         // Empty current log list
-        let filtered_messages: Vec<LogMessage> = self.logs_raw
+        let filtered_messages: Vec<LogMessage> = self
+            .logs_raw
             .iter()
             .map(|msg| self.apply_filters(msg.timestamp, msg.source_id, msg.message.to_string()))
             .map(|msg| msg.unwrap())
             .collect();
 
-        let _ = self.command_response_tx.send(UiCommand::UpdateLogs(filtered_messages));
+        let _ = self
+            .command_response_tx
+            .send(UiCommand::UpdateLogs(filtered_messages));
         Ok(())
     }
 
     /// Add a new filter
-    /// 
+    ///
     /// Not only store the new filter, but also regenerate the filtered log list and send it to the
     /// application so it can update the log view
     fn add_filter(&mut self, filter: LogFilter) -> Result<(), String> {
-        
         // Add new filter
         self.filters.push(filter.clone());
 
         // Empty current log list
-        let filtered_messages: Vec<LogMessage> = self.logs_raw
+        let filtered_messages: Vec<LogMessage> = self
+            .logs_raw
             .iter()
             .map(|msg| self.apply_filters(msg.timestamp, msg.source_id, msg.message.to_string()))
             .filter(|msg| msg.is_some())
             .map(|msg| msg.unwrap())
             .collect();
 
-        let _ = self.command_response_tx.send(UiCommand::UpdateLogs(filtered_messages));
+        let _ = self
+            .command_response_tx
+            .send(UiCommand::UpdateLogs(filtered_messages));
         debug!("Added {:?}", filter);
 
         Ok(())
@@ -316,7 +335,7 @@ impl Commander {
                 return Err("Source has no RAM state".to_string());
             }
         };
-        
+
         let mut log_bytes = match self.log_sources[idx].take_storage() {
             Some(bytes) => bytes,
             None => Vec::new(),
@@ -329,7 +348,10 @@ impl Commander {
         // Remove zeros
         log_bytes.retain(|&b| b != 0);
 
-        debug!("Received {} bytes. Current storage state:\n{:?}", bytes_len, log_bytes);
+        debug!(
+            "Received {} bytes. Current storage state:\n{:?}",
+            bytes_len, log_bytes
+        );
 
         // Get timestamp
         let ts = LogTimestamp::now();
@@ -338,12 +360,11 @@ impl Commander {
 
         // Split at every newline
         for raw_line in log_bytes.split_inclusive(|&c| c == b'\n') {
-            
             // If current line does not contain '\n' do not process it (is incomplete)
             if !raw_line.contains(&b'\n') {
                 break;
             }
-            
+
             // Update count of used-up bytes
             count = count + raw_line.len();
 
@@ -375,7 +396,7 @@ impl Commander {
             });
 
             // If we are streaming logs to a file, add the line to it
-            if let Some(handle) =  &mut self.stream_logs_file_handle {
+            if let Some(handle) = &mut self.stream_logs_file_handle {
                 if !self.stream_logs {
                     error!("Handle not null even though streaming is disabled!!");
                 }
@@ -387,7 +408,6 @@ impl Commander {
             if let Some(log_message) = self.apply_filters(ts, id as i32, line.to_string()) {
                 let _ = self.rtt_tx.send(log_message);
             }
-
         }
 
         // Let's try to be as ineficient as possible
@@ -398,10 +418,9 @@ impl Commander {
     }
 
     /// Reset target
-    /// 
+    ///
     /// Issue a reset on the MCU connected to the indicated probe
     fn cmd_reset(&mut self, source_id: u32) -> Result<(), String> {
-
         // Get the internal index to interact with it
         let idx = self.get_source_idx(source_id);
         if idx.is_none() {
@@ -428,27 +447,33 @@ impl Commander {
         Ok(())
     }
 
-
-
     /// Implementation for Command::GetProbes
-    /// 
+    ///
     /// Reinitialize all the probe/target information and use it to generate a vector of `TargetInformation`, which
     /// is later sent via a mpsc channel to the entity that queried it
     /// Self reveiew: If this was better it would be nasty, currently is just... welp.
-    fn cmd_refresh_probe_info (&mut self) -> Result<(), String> {
+    fn cmd_refresh_probe_info(&mut self) -> Result<(), String> {
         info!("Refresh probe information");
 
         // Add new probes
         let lister = Lister::new();
         for probe in lister.list_all() {
-            
             // More IDs than needed will be generated.
             let id = self.get_new_source_id();
 
-            if let Some(target) = self.target_cfg.targets.iter().filter(|t| t.probe_id == *probe.serial_number.as_ref().unwrap()).next() {
-
-                // Get current list of probe serial ids 
-                let current_serials: Vec<String> = self.probes.iter().map(|t| t.probe_info.serial_number.clone().unwrap()).collect();
+            if let Some(target) = self
+                .target_cfg
+                .targets
+                .iter()
+                .filter(|t| t.probe_id == *probe.serial_number.as_ref().unwrap())
+                .next()
+            {
+                // Get current list of probe serial ids
+                let current_serials: Vec<String> = self
+                    .probes
+                    .iter()
+                    .map(|t| t.probe_info.serial_number.clone().unwrap())
+                    .collect();
 
                 // If new one is already present, skip further steps
                 if let Some(probe_serial) = &probe.serial_number {
@@ -462,8 +487,12 @@ impl Commander {
                     mcu: target.processor.clone(),
                     probe_info: probe.clone(),
                     backend: match &target.log_backend {
-                        LogBackend::Rtt{elf_path} => LogBackendInformation::Rtt(Commander::rtt_block_from_elf(elf_path)?),
-                        LogBackend::Uart{dev, baud}  => LogBackendInformation::Uart(dev.clone(), *baud),
+                        LogBackend::Rtt { elf_path } => {
+                            LogBackendInformation::Rtt(Commander::rtt_block_from_elf(elf_path)?)
+                        }
+                        LogBackend::Uart { dev, baud } => {
+                            LogBackendInformation::Uart(dev.clone(), *baud)
+                        }
                     },
                     log_source_id: id,
                 };
@@ -473,13 +502,18 @@ impl Commander {
 
                 // Also add the log source
                 match &target.log_backend {
-                    LogBackend::Rtt{elf_path: _} => {
+                    LogBackend::Rtt { elf_path: _ } => {
                         // Create the log source
-                        let new_source = RttSource::new(id, new_target, self.command_tx.clone(), self.probes.last().unwrap().name.clone());                    
+                        let new_source = RttSource::new(
+                            id,
+                            new_target,
+                            self.command_tx.clone(),
+                            self.probes.last().unwrap().name.clone(),
+                        );
                         // Store it
                         self.log_sources.push(LogSource::RttSource(new_source));
-                    },
-                    LogBackend::Uart{dev: _, baud: _} => {
+                    }
+                    LogBackend::Uart { dev: _, baud: _ } => {
                         // Create the log source
                         let new_source = UartSource::new(id, new_target, self.command_tx.clone());
                         // Store it
@@ -487,19 +521,30 @@ impl Commander {
                     }
                 }
                 // Let UI know of the change
-                let _ = self.command_response_tx.send(UiCommand::AddNewSource(id, self.log_sources.last().unwrap().id_string()));
+                let _ = self.command_response_tx.send(UiCommand::AddNewSource(
+                    id,
+                    self.log_sources.last().unwrap().id_string(),
+                ));
             }
         }
 
-        let available_probes_serials: Vec<String> = lister.list_all().iter().map(|t| t.serial_number.clone().expect("No serial!")).collect();
+        let available_probes_serials: Vec<String> = lister
+            .list_all()
+            .iter()
+            .map(|t| t.serial_number.clone().expect("No serial!"))
+            .collect();
         self.probes.retain(|probe| {
             // Keep the ones whose serial is within available ones
             if available_probes_serials.contains(&probe.probe_info.serial_number.clone().unwrap()) {
                 true
             // Remove the rest (disconnect first)
             } else {
-                let _ = self.command_tx.send(Command::DisconnectLogSource(probe.log_source_id));
-                let _ = self.command_response_tx.send(UiCommand::RemoveSource(probe.log_source_id));
+                let _ = self
+                    .command_tx
+                    .send(Command::DisconnectLogSource(probe.log_source_id));
+                let _ = self
+                    .command_response_tx
+                    .send(UiCommand::RemoveSource(probe.log_source_id));
                 false
             }
         });
@@ -512,7 +557,7 @@ impl Commander {
     fn rtt_block_from_elf(path: &String) -> Result<u64, String> {
         let path = std::path::PathBuf::from(path);
         let file_data = std::fs::read(path).unwrap();
-        
+
         let slice = file_data.as_slice();
         let file = ElfBytes::<AnyEndian>::minimal_parse(slice).unwrap();
 
@@ -539,14 +584,11 @@ impl Commander {
 
         error!("Unable to find _SEGGER_RTT symbol in elf file");
         Err(String::new())
-
     }
 
-   
     /// Apply filters to a log message
     fn apply_filters(&self, timestamp: LogTimestamp, id: i32, log: String) -> Option<LogMessage> {
-
-        let mut log = Some(LogMessage{
+        let mut log = Some(LogMessage {
             timestamp: timestamp.clone(),
             style: Style::default().add_modifier(Modifier::DIM),
             message: log,
@@ -560,27 +602,30 @@ impl Commander {
             match current_filter.kind {
                 LogFilterType::Inclusion => {
                     let tmp_log = log.clone().unwrap();
-                    let retain_it = tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
+                    let retain_it = tmp_log.message.contains(&current_filter.msg)
+                        && !current_filter.msg.is_empty();
                     if retain_it {
                         continue;
                     } else {
                         log = None;
                     }
-                },
+                }
                 LogFilterType::Exclusion => {
                     let tmp_log = log.clone().unwrap();
-                    let retain_it = !tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
+                    let retain_it = !tmp_log.message.contains(&current_filter.msg)
+                        && !current_filter.msg.is_empty();
                     if retain_it {
                         continue;
                     } else {
                         log = None;
                     }
-                },
+                }
                 LogFilterType::Highlighter => {
                     let tmp_log = log.clone().unwrap();
-                    let matches_msg = tmp_log.message.contains(&current_filter.msg) && !current_filter.msg.is_empty();
+                    let matches_msg = tmp_log.message.contains(&current_filter.msg)
+                        && !current_filter.msg.is_empty();
                     if matches_msg {
-                        log = Some(LogMessage{
+                        log = Some(LogMessage {
                             timestamp: timestamp.clone(),
                             message: log.unwrap().message,
                             style: current_filter.style,
@@ -595,10 +640,10 @@ impl Commander {
 }
 
 /// Add filter callback
-/// 
+///
 /// Add a filter by parsing the `input` field. It has the general form:
 /// {h/i/e} (optional)color word
-/// 
+///
 /// Examples:
 ///     h red wrn -> add highlight filter (color red) for lines containing "wrn"
 ///     i tempo -> add inclusion filter for lines containing "tempo"
@@ -609,7 +654,9 @@ pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), St
     }
 
     if input.len() < 2 {
-        return Err(String::from("Wrong arguments. Expected \'/{h,i,e} {color} word\'"));
+        return Err(String::from(
+            "Wrong arguments. Expected \'/{h,i,e} {color} word\'",
+        ));
     }
 
     let mut idx = 0;
@@ -634,7 +681,7 @@ pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), St
             "white" => color = style::Color::White,
             "blue" => color = style::Color::Blue,
             "magenta" => color = style::Color::Magenta,
-            _ => ()
+            _ => (),
         }
         idx = idx + 1;
     }
@@ -652,5 +699,3 @@ pub fn add_filter(sender: &Sender<Command>, input: Vec<String>) -> Result<(), St
 
     Ok(())
 }
-
-

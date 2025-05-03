@@ -1,23 +1,25 @@
 use probe_rs::probe::DebugProbeInfo;
-use tracing::{error, info, warn, debug};
+use tracing::{debug, error, info, warn};
 
 use crate::commander::{Command, LogBackendInformation, TargetMcu};
 
 use super::LogSourceTrait;
 
 use core::time;
-use std::{io::Read, sync::mpsc::Sender, thread::{self, JoinHandle}};
-
+use std::{
+    io::Read,
+    sync::mpsc::Sender,
+    thread::{self, JoinHandle},
+};
 
 pub struct UartSource {
-
     /// Handle of the thread reading data
     handle: Option<JoinHandle<()>>,
 
     /// Send channel to gracefully shutdown the thread
     thread_control_tx: Option<Sender<bool>>,
-    
-    /// Send channel to Commander 
+
+    /// Send channel to Commander
     command_tx: Sender<Command>,
 
     /// Holds state
@@ -51,7 +53,6 @@ impl UartSource {
     }
 }
 
-
 impl LogSourceTrait for UartSource {
     fn connect(&mut self) {
         if self.is_connected {
@@ -59,7 +60,9 @@ impl LogSourceTrait for UartSource {
         }
 
         if self.handle.is_some() || self.thread_control_tx.is_some() {
-            warn!("Unexpected state, app thinks this source is disconnected but the thread and/or metadata still exists. Disconnecting for cleanup");
+            warn!(
+                "Unexpected state, app thinks this source is disconnected but the thread and/or metadata still exists. Disconnecting for cleanup"
+            );
             self.disconnect();
         }
 
@@ -84,12 +87,12 @@ impl LogSourceTrait for UartSource {
         };
 
         let handle = std::thread::spawn(move || {
-
             info!("Thread started - UartSource \"{} - {}\"", dev_path, baud);
 
             let mut port = serialport::new(dev_path, baud)
                 .timeout(std::time::Duration::from_secs(1))
-                .open().expect("Failed to open port");
+                .open()
+                .expect("Failed to open port");
 
             info!("Serial port opened");
 
@@ -110,29 +113,31 @@ impl LogSourceTrait for UartSource {
                         if e.kind() == std::io::ErrorKind::TimedOut {
                             continue;
                         }
-                        
+
                         // Broken pipe means the cable was disconnected and an infinite loop
                         // happens, manage it
                         if e.kind() == std::io::ErrorKind::BrokenPipe {
                             error!("Serial port connection error");
                             let _ = commander_tx.send(Command::DisconnectLogSource(id));
                             let _ = commander_tx.send(Command::RefreshProbeInfo);
-                            let _ = commander_tx.send(Command::PrintMessage( String::from("Serial port connection error") ));
+                            let _ = commander_tx.send(Command::PrintMessage(String::from(
+                                "Serial port connection error",
+                            )));
                             break;
                         }
 
                         // Otherwise report it
                         error!("Port read error: {}", e);
-                        let _ = commander_tx.send(Command::PrintMessage(format!("Error reading port {}", e)));
-                        
+                        let _ = commander_tx
+                            .send(Command::PrintMessage(format!("Error reading port {}", e)));
+
                         continue;
-                    },
+                    }
                     Ok(count) => count,
                 };
 
                 // If there is data, clean and send it
                 if count > 0 {
-
                     debug!("Read {} bytes", count);
                     // Take the part with data
                     let (buf, _) = buf.split_at(count);
@@ -143,7 +148,8 @@ impl LogSourceTrait for UartSource {
                         Ok(_) => (),
                         Err(e) => {
                             error!("Send error: {}", e);
-                            let _ = commander_tx.send(Command::PrintMessage(String::from("Internal error!")));
+                            let _ = commander_tx
+                                .send(Command::PrintMessage(String::from("Internal error!")));
                             continue;
                         }
                     }
@@ -171,7 +177,7 @@ impl LogSourceTrait for UartSource {
             match t_handle.join() {
                 Ok(_) => (),
                 Err(e) => error!("{:?}", e),
-            }            
+            }
         } else {
             error!("Thread handle is None");
         }
@@ -180,7 +186,7 @@ impl LogSourceTrait for UartSource {
     fn id_eq(&self, id: u32) -> bool {
         self.id == id
     }
-    
+
     fn id_string(&self) -> String {
         self.mcu_info.name.clone()
     }

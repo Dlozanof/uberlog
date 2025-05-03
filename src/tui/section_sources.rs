@@ -1,14 +1,18 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::{Modifier, Style}, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    text::Line,
+    widgets::{Block, BorderType, Borders, Paragraph},
+};
 use tracing::error;
 
 use crate::{commander::Command, layout_section::LayoutSection};
 
-
 struct SourceInformation {
-
     /// Whether it is currently connected or not
     connected: bool,
 
@@ -20,12 +24,11 @@ struct SourceInformation {
 }
 
 impl SourceInformation {
-
     fn new(id: u32, name: String) -> Self {
         SourceInformation {
             id,
             name,
-            connected: false
+            connected: false,
         }
     }
 
@@ -42,7 +45,6 @@ impl SourceInformation {
     }
 }
 
-
 pub struct SectionSources {
     pub command_tx: Sender<Command>,
 
@@ -51,11 +53,9 @@ pub struct SectionSources {
 
     /// Currently selected source
     selected_source_idx: usize,
-
 }
 
 impl SectionSources {
-
     pub fn new(command_tx: Sender<Command>) -> Self {
         SectionSources {
             command_tx,
@@ -85,7 +85,6 @@ impl SectionSources {
         }
     }
 
-
     fn get_source_idx(&self, id: u32) -> Option<usize> {
         for (idx, source) in self.sources.iter().enumerate() {
             if source.id == id {
@@ -95,20 +94,17 @@ impl SectionSources {
 
         return None;
     }
-
-
 }
 
 impl LayoutSection for SectionSources {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
-
         // Probe information
         let mut source_list_lines = Vec::new();
 
         for (idx, info) in self.sources.iter().enumerate() {
             let status = match info.is_connected() {
-               true => "Connected",
-               false => "Not connected",
+                true => "Connected",
+                false => "Not connected",
             };
 
             // Create line and make it Bold if it is the currently selected source
@@ -116,16 +112,17 @@ impl LayoutSection for SectionSources {
             if idx == self.selected_source_idx {
                 line.style = line.style.add_modifier(Modifier::BOLD);
             }
-            
+
             source_list_lines.push(line);
         }
         let probse_block_title = Line::from("Log Sources");
         let probes_block = Block::default()
             .title(probse_block_title)
-            .borders(Borders::ALL).border_type(BorderType::Double)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
             .style(Style::default());
 
-        let probe_list  = Paragraph::new(source_list_lines).block(probes_block);
+        let probe_list = Paragraph::new(source_list_lines).block(probes_block);
         frame.render_widget(probe_list, area);
     }
 
@@ -136,7 +133,10 @@ impl LayoutSection for SectionSources {
                 if self.sources.is_empty() {
                     return;
                 }
-                self.selected_source_idx = self.selected_source_idx.saturating_add(1).min(self.sources.len() - 1);
+                self.selected_source_idx = self
+                    .selected_source_idx
+                    .saturating_add(1)
+                    .min(self.sources.len() - 1);
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.selected_source_idx = self.selected_source_idx.saturating_sub(1);
@@ -154,25 +154,35 @@ impl LayoutSection for SectionSources {
 
             KeyCode::Char('c') => {
                 if self.sources.is_empty() {
-                    let _ = self.command_tx.send(Command::PrintMessage(String::from("No probes detected")));
+                    let _ = self
+                        .command_tx
+                        .send(Command::PrintMessage(String::from("No probes detected")));
                     return;
                 }
-                let _ = self.command_tx.send(Command::ConnectLogSource(self.sources[self.selected_source_idx].id));
+                let _ = self.command_tx.send(Command::ConnectLogSource(
+                    self.sources[self.selected_source_idx].id,
+                ));
             }
             KeyCode::Char('d') => {
                 if self.sources.is_empty() {
-                    let _ = self.command_tx.send(Command::PrintMessage(String::from("No probes detected")));
+                    let _ = self
+                        .command_tx
+                        .send(Command::PrintMessage(String::from("No probes detected")));
                     return;
                 }
-                let _ = self.command_tx.send(Command::DisconnectLogSource(self.sources[self.selected_source_idx].id));
+                let _ = self.command_tx.send(Command::DisconnectLogSource(
+                    self.sources[self.selected_source_idx].id,
+                ));
             }
             KeyCode::Char('r') => {
                 let _ = self.command_tx.send(Command::RefreshProbeInfo);
             }
             KeyCode::Char('R') => {
-                let _ = self.command_tx.send(Command::Reset(self.sources[self.selected_source_idx].id));
+                let _ = self
+                    .command_tx
+                    .send(Command::Reset(self.sources[self.selected_source_idx].id));
             }
-            _ => ()
+            _ => (),
         }
     }
 

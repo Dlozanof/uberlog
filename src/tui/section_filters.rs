@@ -1,9 +1,15 @@
 use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
-use ratatui::{layout::Rect, style::{Modifier, Style}, text::Line, widgets::{Block, BorderType, Borders, Paragraph}, Frame};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    text::Line,
+    widgets::{Block, BorderType, Borders, Paragraph},
+};
 
-use crate::{commander::Command, layout_section::LayoutSection, LogFilter, LogFilterType};
+use crate::{LogFilter, LogFilterType, commander::Command, layout_section::LayoutSection};
 
 pub struct SectionFilters {
     filters: Vec<LogFilter>,
@@ -16,7 +22,7 @@ impl SectionFilters {
         SectionFilters {
             filters: Vec::new(),
             selected_filter: 0,
-            command_tx
+            command_tx,
         }
     }
     pub fn set_filters(&mut self, filters: Vec<LogFilter>) {
@@ -26,11 +32,9 @@ impl SectionFilters {
 
 impl LayoutSection for SectionFilters {
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
-        
         // Print filters
         let mut filter_list_lines = Vec::new();
         for (idx, filter) in self.filters.iter().enumerate() {
-
             // Map kind to text
             let type_text = match filter.kind {
                 LogFilterType::Exclusion => "Exclusion",
@@ -44,17 +48,19 @@ impl LayoutSection for SectionFilters {
             }
 
             // Print the line
-            filter_list_lines.push(Line::from(format!("[{}] {} <{}>", idx, type_text, filter.msg)).style(line_style));
+            filter_list_lines.push(
+                Line::from(format!("[{}] {} <{}>", idx, type_text, filter.msg)).style(line_style),
+            );
         }
 
         let filters_block_title = Line::from("Filters");
         let filters_block = Block::default()
             .title(filters_block_title)
-            .borders(Borders::ALL).border_type(BorderType::Double)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
             .style(Style::default());
 
-
-        let filters_list  = Paragraph::new(filter_list_lines).block(filters_block);
+        let filters_list = Paragraph::new(filter_list_lines).block(filters_block);
         frame.render_widget(filters_list, area);
     }
 
@@ -65,7 +71,10 @@ impl LayoutSection for SectionFilters {
                 if self.filters.is_empty() {
                     return;
                 }
-                self.selected_filter = self.selected_filter.saturating_add(1).min(self.filters.len() - 1);
+                self.selected_filter = self
+                    .selected_filter
+                    .saturating_add(1)
+                    .min(self.filters.len() - 1);
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.selected_filter = self.selected_filter.saturating_sub(1);
@@ -103,7 +112,7 @@ impl LayoutSection for SectionFilters {
                 // Update current index
                 self.selected_filter = self.selected_filter.saturating_sub(1);
             }
-            _ => ()
+            _ => (),
         }
     }
 

@@ -2,7 +2,6 @@ use std::sync::mpsc::Sender;
 
 use super::Command;
 
-
 /// Start streaming into a file
 pub fn stream_start(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
     if input.len() != 1 {
@@ -30,7 +29,7 @@ pub fn find_log(sender: &Sender<Command>, input: Vec<String>) -> Result<(), Stri
     Ok(())
 }
 
-/// Stream an input file 
+/// Stream an input file
 pub fn stream_file(sender: &Sender<Command>, input: Vec<String>) -> Result<(), String> {
     if input.is_empty() {
         return Err(String::from("path no"));
@@ -44,4 +43,3 @@ pub fn stream_file(sender: &Sender<Command>, input: Vec<String>) -> Result<(), S
 
     Ok(())
 }
-

@@ -1,23 +1,28 @@
-use probe_rs::{probe::DebugProbeInfo, rtt::{Rtt, ScanRegion}, Permissions};
-use tracing::{error, info, warn, debug};
+use probe_rs::{
+    Permissions,
+    probe::DebugProbeInfo,
+    rtt::{Rtt, ScanRegion},
+};
+use tracing::{debug, error, info, warn};
 
 use crate::commander::{Command, LogBackendInformation, TargetMcu};
 
 use super::LogSourceTrait;
 
 use core::time;
-use std::{sync::mpsc::Sender, thread::{self, JoinHandle}};
-
+use std::{
+    sync::mpsc::Sender,
+    thread::{self, JoinHandle},
+};
 
 pub struct RttSource {
-
     /// Handle of the thread reading data
     handle: Option<JoinHandle<()>>,
 
     /// Send channel to gracefully shutdown the thread
     thread_control_tx: Option<Sender<bool>>,
-    
-    /// Send channel to Commander 
+
+    /// Send channel to Commander
     command_tx: Sender<Command>,
 
     /// Holds state
@@ -37,7 +42,12 @@ pub struct RttSource {
 }
 
 impl RttSource {
-    pub fn new(id: u32, mcu_info: TargetMcu, command_tx: Sender<Command>, target_name: String) -> RttSource {
+    pub fn new(
+        id: u32,
+        mcu_info: TargetMcu,
+        command_tx: Sender<Command>,
+        target_name: String,
+    ) -> RttSource {
         RttSource {
             id,
             mcu_info,
@@ -55,7 +65,6 @@ impl RttSource {
     }
 }
 
-
 impl LogSourceTrait for RttSource {
     fn connect(&mut self) {
         if self.is_connected {
@@ -63,7 +72,9 @@ impl LogSourceTrait for RttSource {
         }
 
         if self.handle.is_some() || self.thread_control_tx.is_some() {
-            warn!("Unexpected state, app thinks this source is disconnected but the thread and/or metadata still exists. Disconnecting for cleanup");
+            warn!(
+                "Unexpected state, app thinks this source is disconnected but the thread and/or metadata still exists. Disconnecting for cleanup"
+            );
             self.disconnect();
         }
 
@@ -90,7 +101,7 @@ impl LogSourceTrait for RttSource {
         };
         let rtt_address = match self.mcu_info.backend {
             LogBackendInformation::Rtt(addr) => addr,
-            LogBackendInformation::Uart(_,_) => {
+            LogBackendInformation::Uart(_, _) => {
                 error!("Trying to connect to RTT a target that uses UART");
                 return;
             }
@@ -107,7 +118,6 @@ impl LogSourceTrait for RttSource {
         let source_name = self.id_string();
 
         let handle = std::thread::spawn(move || {
-
             info!("Thread started - RttSource \"{}\"", source_name);
 
             // Create the core
@@ -115,7 +125,7 @@ impl LogSourceTrait for RttSource {
             info!("Core open");
 
             // Attach to RTT
-            let mut rtt = match Rtt::attach_region(&mut core,&ScanRegion::Exact(rtt_address)) {
+            let mut rtt = match Rtt::attach_region(&mut core, &ScanRegion::Exact(rtt_address)) {
                 Ok(val) => val,
                 Err(e) => {
                     error!("Attach region error: {}", e);
@@ -124,7 +134,6 @@ impl LogSourceTrait for RttSource {
             };
             info!("Region attached");
             info!("There are {} channels", rtt.up_channels().len());
-
 
             let input = &mut rtt.up_channels()[0];
             loop {
@@ -142,14 +151,14 @@ impl LogSourceTrait for RttSource {
                     Ok(val) => val,
                     Err(e) => {
                         error!("Port read error: {}", e);
-                        let _ = commander_tx.send(Command::PrintMessage(format!("Error reading port {}", e)));
+                        let _ = commander_tx
+                            .send(Command::PrintMessage(format!("Error reading port {}", e)));
                         continue;
                     }
                 };
 
                 // If there is data, clean and send it
                 if count > 0 {
-
                     debug!("Read {} bytes", count);
                     // Take the part with data
                     let (buf, _) = buf.split_at(count);
@@ -160,7 +169,8 @@ impl LogSourceTrait for RttSource {
                         Ok(_) => (),
                         Err(e) => {
                             error!("Send error: {}", e);
-                            let _ = commander_tx.send(Command::PrintMessage(String::from("Internal error!")));
+                            let _ = commander_tx
+                                .send(Command::PrintMessage(String::from("Internal error!")));
                             continue;
                         }
                     }
@@ -188,7 +198,7 @@ impl LogSourceTrait for RttSource {
             match t_handle.join() {
                 Ok(_) => (),
                 Err(e) => error!("{:?}", e),
-            }            
+            }
         } else {
             error!("Thread handle is None");
         }
@@ -197,7 +207,7 @@ impl LogSourceTrait for RttSource {
     fn id_eq(&self, id: u32) -> bool {
         self.id == id
     }
-    
+
     fn id_string(&self) -> String {
         format!("{} (RTT - {})", self.target_name, self.mcu_info.name)
     }

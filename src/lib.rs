@@ -1,26 +1,28 @@
 use chrono::Timelike;
 use ratatui::style::Style;
 
-pub mod tui;
+pub mod command_parser;
 pub mod commander;
 pub mod configuration;
 pub mod layout_section;
-pub mod command_parser;
 pub mod log_source;
+pub mod tui;
 
 #[derive(Clone, Copy)]
 pub struct LogTimestamp {
     hour: u32,
     minute: u32,
     second: u32,
-    ms: u32
+    ms: u32,
 }
 
 impl LogTimestamp {
-
     /// Get string representation from timestamp
     pub fn to_string(&self) -> String {
-        format!("{:02}:{:02}:{:02}.{:03}", self.hour, self.minute, self.second, self.ms)
+        format!(
+            "{:02}:{:02}:{:02}.{:03}",
+            self.hour, self.minute, self.second, self.ms
+        )
     }
 
     /// Get current timestamp
@@ -46,7 +48,6 @@ pub struct LogMessage {
     pub message: String,
     pub style: Style,
 }
-
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum LogFilterType {

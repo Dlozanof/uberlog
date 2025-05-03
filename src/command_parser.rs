@@ -4,7 +4,6 @@ use crossterm::event::KeyCode;
 
 use crate::{commander::Command, configuration::Alias};
 
-
 pub enum State {
     Idle,
     Parsing,
@@ -12,7 +11,7 @@ pub enum State {
 
 pub struct Instruction {
     opcode: String,
-    operation: fn(&Sender<Command>, Vec<String>) -> Result<(), String> // This is bullshit, better to have a command_tx and interact with Commander
+    operation: fn(&Sender<Command>, Vec<String>) -> Result<(), String>, // This is bullshit, better to have a command_tx and interact with Commander
 }
 
 pub struct CommandParser {
@@ -24,7 +23,6 @@ pub struct CommandParser {
 }
 
 impl CommandParser {
-
     /// Create a new commander
     pub fn new(command_tx: Sender<Command>, aliases: Vec<Alias>) -> CommandParser {
         CommandParser {
@@ -50,11 +48,13 @@ impl CommandParser {
     }
 
     /// Register an instruction to the command parser
-    pub fn register_instruction(&mut self, opcode: String, operation: fn(&Sender<Command>, Vec<String>) -> Result<(), String>) {
-        self.registered_instructions.push(Instruction {
-            opcode,
-            operation
-        });
+    pub fn register_instruction(
+        &mut self,
+        opcode: String,
+        operation: fn(&Sender<Command>, Vec<String>) -> Result<(), String>,
+    ) {
+        self.registered_instructions
+            .push(Instruction { opcode, operation });
     }
 
     // Print message
@@ -64,14 +64,15 @@ impl CommandParser {
 
     /// Command complete, process it
     fn execute_order_66(&mut self) {
-
         // Handle special case of `/` for search
         self.parsed_command = self.parsed_command.replacen("/", ":find ", 1);
 
         // Split with spaces
-        let mut tokenized_instruction: Vec<String> = self.parsed_command.split_ascii_whitespace().map(|x| {
-            String::from(x.trim())
-        }).collect();
+        let mut tokenized_instruction: Vec<String> = self
+            .parsed_command
+            .split_ascii_whitespace()
+            .map(|x| String::from(x.trim()))
+            .collect();
 
         if tokenized_instruction.len() == 0 {
             return;
@@ -79,10 +80,14 @@ impl CommandParser {
 
         // Identify and apply aliases
         for alias in &self.aliases {
-            if alias.alias.eq(&tokenized_instruction[0]){
+            if alias.alias.eq(&tokenized_instruction[0]) {
                 tokenized_instruction.remove(0);
 
-                let mut alias_token: Vec<String> = alias.expanded.split_ascii_whitespace().map(|x| String::from(x.trim())).collect();
+                let mut alias_token: Vec<String> = alias
+                    .expanded
+                    .split_ascii_whitespace()
+                    .map(|x| String::from(x.trim()))
+                    .collect();
                 alias_token.append(&mut tokenized_instruction);
                 tokenized_instruction = alias_token;
             }
@@ -93,7 +98,7 @@ impl CommandParser {
         let inst: String = inst.last().expect("Really bad").to_owned();
 
         //let _ = self.command_tx.send(Command::PrintMessage(format!("inst: {:?}, args {:?}", inst, args)));
-        
+
         // Execute command
         for registered_inst in &self.registered_instructions {
             if registered_inst.opcode.eq(&inst) {
@@ -127,27 +132,27 @@ impl CommandParser {
                             self.state = State::Parsing;
                             self.parsed_command.clear();
                             self.parsed_command.push(c);
-                        },
+                        }
                         State::Parsing => self.parsed_command.push(c),
                     }
                 };
-            },
+            }
             // Append to the command that is being parsed
             KeyCode::Char(c) => self.parsed_command.push(c),
-            
+
             // Search for the matching instruction
             KeyCode::Enter => {
                 self.execute_order_66();
-            },
-            
+            }
+
             // Cancel
             KeyCode::Esc => self.cancel_parsing(),
-            
+
             // Remove last character
             KeyCode::Backspace => {
                 let _ = self.parsed_command.pop();
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 }

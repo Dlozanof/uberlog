@@ -1,6 +1,6 @@
 pub mod file_source;
-pub mod uart_source;
 pub mod rtt_source;
+pub mod uart_source;
 
 pub trait LogSourceTrait {
     fn connect(&mut self);
@@ -61,7 +61,6 @@ impl LogSourceTrait for LogSource {
         }
     }
 }
-
 
 pub use file_source::FileSource;
 pub use rtt_source::RttSource;

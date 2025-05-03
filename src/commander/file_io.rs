@@ -4,14 +4,12 @@ use tracing::error;
 
 use crate::log_source::{FileSource, LogSource, LogSourceTrait};
 
-use super::UiCommand;
 pub use super::Commander;
+use super::UiCommand;
 
 impl Commander {
-
-    /// Stream file 
+    /// Stream file
     pub(crate) fn cmd_stream_file(&mut self, path: String) -> Result<(), String> {
-
         // Get new source ID
         let id = self.get_new_source_id();
 
@@ -23,14 +21,19 @@ impl Commander {
         self.log_sources.push(LogSource::FileSource(new_source));
 
         // Let UI know of the change
-        let _ = self.command_response_tx.send(UiCommand::AddNewSource(id, self.log_sources.last().unwrap().id_string()));
-        let _ = self.command_response_tx.send(UiCommand::SetConnectionSource(id, true));
+        let _ = self.command_response_tx.send(UiCommand::AddNewSource(
+            id,
+            self.log_sources.last().unwrap().id_string(),
+        ));
+        let _ = self
+            .command_response_tx
+            .send(UiCommand::SetConnectionSource(id, true));
 
         Ok(())
     }
 
     /// Configure output log streaming
-    /// 
+    ///
     /// Receive a status update and a path where to stream
     pub(crate) fn cmd_log_stream(&mut self, streaming: bool, path: String) -> Result<(), String> {
         if streaming {
@@ -47,7 +50,9 @@ impl Commander {
                 }
                 self.stream_logs_file_handle = Some(p);
                 self.stream_logs = true;
-                let _ = self.command_response_tx.send(UiCommand::TextMessage { message: format!("Saved/streaming data into <{}>", path) });
+                let _ = self.command_response_tx.send(UiCommand::TextMessage {
+                    message: format!("Saved/streaming data into <{}>", path),
+                });
             }
         } else {
             // Make sure we were not -not- streaming already
@@ -60,10 +65,11 @@ impl Commander {
             self.stream_logs_file_handle = None;
             self.stream_logs = false;
 
-            let _ = self.command_response_tx.send(UiCommand::TextMessage { message: "Streaming stopped".to_string() });
+            let _ = self.command_response_tx.send(UiCommand::TextMessage {
+                message: "Streaming stopped".to_string(),
+            });
         }
-        
+
         Ok(())
     }
-
 }
