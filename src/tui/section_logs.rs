@@ -10,8 +10,10 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::{LogMessage, LogTimestamp, commander::Command, layout_section::LayoutSection};
+use crate::{LogMessage, LogTimestamp, commander::Command};
 use ansi_to_tui::IntoText;
+
+use super::LayoutSection;
 
 enum SearchDirection {
     FOWARD,

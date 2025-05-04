@@ -3,14 +3,9 @@ use std::{fs::OpenOptions, time::Duration};
 use tracing::{Level, error, info, span};
 use tracing_subscriber::{Registry, fmt, prelude::*};
 use uberlog_lib::{
-    LogMessage,
-    command_parser::CommandParser,
-    commander::{self, Command, Commander, UiCommand, add_filter},
-    configuration::{self, ApplicationConfiguration},
-    layout_section::LayoutSection,
-    tui::{
-        section_filters::SectionFilters, section_logs::SectionLogs, section_sources::SectionSources,
-    },
+    command_parser::CommandParser, commander::{self, add_filter, Command, Commander, UiCommand}, configuration::{self, ApplicationConfiguration}, tui::{
+        section_filters::SectionFilters, section_logs::SectionLogs, section_sources::SectionSources, LayoutSection,
+    }, LogMessage
 };
 
 use std::sync::mpsc::{Receiver, Sender};
