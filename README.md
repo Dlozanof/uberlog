@@ -31,17 +31,12 @@ If that is not the case of your project, then you need to use a different progra
     - Include only logs that contain a given expression
 - Reset the device
 - Stream logs to a file
-- \[soon\] Manage a supported power supply
-- \[soon\] Flash firmware
 
 # Usage
 
 The tool depends on the creation of a `.gadget.yaml` file inside the project directory that contains the information regarding your [target](https://probe.rs/targets):
 
 ```
-power: !Dp100
-  voltage: 5
-  current: 0.5
 targets:
 - name: Main app (RTT)
   processor: CC2650
