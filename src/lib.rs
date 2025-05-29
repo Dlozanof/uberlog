@@ -4,7 +4,6 @@ use ratatui::style::Style;
 pub mod command_parser;
 pub mod commander;
 pub mod configuration;
-pub mod layout_section;
 pub mod log_source;
 pub mod tui;
 

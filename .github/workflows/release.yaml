@@ -1,0 +1,52 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0.0
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install libudev (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/uberlog${{ matrix.ext }} dist/uberlog-${{ matrix.target }}${{ matrix.ext }}
+        shell: bash
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
