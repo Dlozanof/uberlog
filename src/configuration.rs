@@ -25,7 +25,7 @@ pub enum PowerSupply {
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct TargetConfiguration {
-    pub power: PowerSupply,
+    //pub power: PowerSupply,
     pub targets: Vec<Target>,
 }
 
@@ -37,7 +37,7 @@ pub struct Alias {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ApplicationConfiguration {
-    /// Default color for non filtered data
+    /// TODO: Default color for non filtered data
 
     /// Alias list
     pub alias_list: Vec<Alias>,
@@ -72,6 +72,7 @@ impl ApplicationConfiguration {
     }
 
     pub fn load_cfg() -> ApplicationConfiguration {
+        // Please be aware that the warning about home_dir is benign, the project doc says in a future release will be removed
         let mut p = std::env::home_dir().expect("Unable to get HOME");
         p.push(".config/uberlog/config.yaml");
 

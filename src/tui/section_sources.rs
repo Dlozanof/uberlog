@@ -10,7 +10,9 @@ use ratatui::{
 };
 use tracing::error;
 
-use crate::{commander::Command, layout_section::LayoutSection};
+use crate::commander::Command;
+
+use super::LayoutSection;
 
 struct SourceInformation {
     /// Whether it is currently connected or not

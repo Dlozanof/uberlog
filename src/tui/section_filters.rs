@@ -9,7 +9,9 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
 };
 
-use crate::{LogFilter, LogFilterType, commander::Command, layout_section::LayoutSection};
+use crate::{LogFilter, LogFilterType, commander::Command};
+
+use super::LayoutSection;
 
 pub struct SectionFilters {
     filters: Vec<LogFilter>,

@@ -31,17 +31,12 @@ If that is not the case of your project, then you need to use a different progra
     - Include only logs that contain a given expression
 - Reset the device
 - Stream logs to a file
-- \[soon\] Manage a supported power supply
-- \[soon\] Flash firmware
 
 # Usage
 
 The tool depends on the creation of a `.gadget.yaml` file inside the project directory that contains the information regarding your [target](https://probe.rs/targets):
 
 ```
-power: !Dp100
-  voltage: 5
-  current: 0.5
 targets:
 - name: Main app (RTT)
   processor: CC2650
@@ -64,7 +59,7 @@ When the project is a bit more mature I will improve in the documentation, since
 
 ## Configuration file
 
-At this point only user-defined aliases are available to configure
+The configuration file is automatically created if it does not exist. Currently only user-defined aliases are available to configure:
 ```yaml
 # file: ~/.config/uberlog/config.yaml
 alias_list:
@@ -89,9 +84,9 @@ Most commands can be issued from here, they are vim-like in that they start with
 - `:filter i <keyword>` : filter out all logs that do not include `<keyword>`
 - `:filter e <keyword>` : filter out all logs that include `<keyword>`
 - `:filter h <color> <keyword>` : highlight in `<color>` all logs which contain `<keyword>`. Available colors are: `red`, `green`, `yellow`, `white`, `blue`, `magenta`.
-- `:stream <path>` : start streaming data from the file defined by `path`.
-- `:sstream <path>` : stream the logs to `path`
-- `:sstop` : stop streaming logs to the path given with `:sstream`
+- `:stream_in <path>` : start streaming data from the file defined by `path`.
+- `:stream_out <path>` : stream the logs to `path`
+- `:stream_out_stop` : stop streaming logs to the path given with `:sstream`
 
 Keybindings:
 - `g` : go to top of logs
@@ -118,6 +113,7 @@ Keybindings:
 - `c`onnect : start reading logs from the probe
 - `d`isconnect : stop reading longs from the probe
 - `r`efresh : refresh the list of detected probes
+- `R`eset : issue a reset to the target
 
 ### Filter view
 
@@ -133,7 +129,9 @@ The second one is that the user can navigate the filter list with the arrow keys
 
 # Installation
 
-So far no package manager is supported, only build for source like a madman. But assuming you have [Rust](https://www.rust-lang.org/tools/install) in your computer you can just:
+You can just download the latest release [binary](https://github.com/Dlozanof/uberlog/releases), please note that only linux is supported, I just added windows and mac because it was easy enough; but I have no means to test them.
+
+Otherwise, assuming you have [Rust](https://www.rust-lang.org/tools/install) in your computer you can just:
 
 ```
 cargo install --path .

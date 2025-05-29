@@ -3,14 +3,9 @@ use std::{fs::OpenOptions, time::Duration};
 use tracing::{Level, error, info, span};
 use tracing_subscriber::{Registry, fmt, prelude::*};
 use uberlog_lib::{
-    LogMessage,
-    command_parser::CommandParser,
-    commander::{self, Command, Commander, UiCommand, add_filter},
-    configuration::{self, ApplicationConfiguration},
-    layout_section::LayoutSection,
-    tui::{
-        section_filters::SectionFilters, section_logs::SectionLogs, section_sources::SectionSources,
-    },
+    command_parser::CommandParser, commander::{self, add_filter, Command, Commander, UiCommand}, configuration::{self, ApplicationConfiguration}, tui::{
+        section_filters::SectionFilters, section_logs::SectionLogs, section_sources::SectionSources, LayoutSection,
+    }, LogMessage
 };
 
 use std::sync::mpsc::{Receiver, Sender};
@@ -105,11 +100,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Register commands -- File
     app.command_parser
-        .register_instruction(String::from(":stream"), commander::stream_file);
+        .register_instruction(String::from(":stream_in"), commander::stream_file);
     app.command_parser
-        .register_instruction(String::from(":sstart"), commander::stream_start);
+        .register_instruction(String::from(":stream_out"), commander::stream_start);
     app.command_parser
-        .register_instruction(String::from(":sstop"), commander::stream_stop);
+        .register_instruction(String::from(":stream_out_stop"), commander::stream_stop);
     // Register commands -- Internal
     app.command_parser
         .register_instruction(String::from(":find"), commander::find_log);
