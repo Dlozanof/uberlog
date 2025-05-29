@@ -100,11 +100,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Register commands -- File
     app.command_parser
-        .register_instruction(String::from(":stream"), commander::stream_file);
+        .register_instruction(String::from(":stream_in"), commander::stream_file);
     app.command_parser
-        .register_instruction(String::from(":sstart"), commander::stream_start);
+        .register_instruction(String::from(":stream_out"), commander::stream_start);
     app.command_parser
-        .register_instruction(String::from(":sstop"), commander::stream_stop);
+        .register_instruction(String::from(":stream_out_stop"), commander::stream_stop);
     // Register commands -- Internal
     app.command_parser
         .register_instruction(String::from(":find"), commander::find_log);
