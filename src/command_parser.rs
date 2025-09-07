@@ -57,22 +57,26 @@ impl CommandParser {
             .push(Instruction { opcode, operation });
     }
 
-    // Print message
-    pub fn print_message(&mut self, msg: String) {
-        self.parsed_command = msg;
-    }
-
     /// Command complete, process it
     fn execute_order_66(&mut self) {
-        // Handle special case of `/` for search
-        self.parsed_command = self.parsed_command.replacen("/", ":find ", 1);
 
-        // Split with spaces
-        let mut tokenized_instruction: Vec<String> = self
-            .parsed_command
-            .split_ascii_whitespace()
-            .map(|x| String::from(x.trim()))
-            .collect();
+        // Handle special case of `/` for search
+        if self.parsed_command.starts_with("/") {
+            self.parsed_command.remove(0);
+            self.parsed_command = format!(":find \"{}\"", self.parsed_command)
+            //self.parsed_command = self.parsed_command.replacen("/", ":find ", 1);
+        }
+        
+        // Split words
+        let mut tokenized_instruction = shell_words::split(&self.parsed_command).unwrap_or(Vec::new());
+        tracing::info!("{:?}", tokenized_instruction);
+
+        //// Split with spaces
+        //let mut tokenized_instruction: Vec<String> = self
+        //    .parsed_command
+        //    .split_ascii_whitespace()
+        //    .map(|x| String::from(x.trim()))
+        //    .collect();
 
         if tokenized_instruction.len() == 0 {
             return;

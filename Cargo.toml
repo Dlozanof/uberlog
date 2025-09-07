@@ -28,3 +28,4 @@ tokio = { version = "1.41.0", features = ["rt", "rt-multi-thread", "time"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 ansi-to-tui = "7.0.0"
+shell-words = "1.1.0"
