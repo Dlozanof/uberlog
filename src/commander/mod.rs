@@ -35,7 +35,7 @@ pub struct Commander {
     log_messages: Vec<LogMessage>,
 
     /// Target configuration (from .gadget.yaml)
-    pub target_cfg: TargetConfiguration,
+    pub target_cfg: Option<TargetConfiguration>,
 
     /// Application configuration (from ~/.config/uberlog/config.yaml)
     pub app_cfg: ApplicationConfiguration,
@@ -178,7 +178,7 @@ impl Commander {
         command_rx: Receiver<Command>,
         command_response_tx: Sender<UiCommand>,
         rtt_tx: Sender<LogMessage>,
-        cfg: TargetConfiguration,
+        cfg: Option<TargetConfiguration>,
         app_cfg: &ApplicationConfiguration,
     ) -> Commander {
         let mut ret = Commander {
@@ -412,6 +412,11 @@ impl Commander {
     fn cmd_refresh_probe_info(&mut self) -> Result<(), String> {
         info!("Refresh probe information");
 
+        if self.target_cfg.is_none() {
+            let _ = self.command_response_tx.send(UiCommand::TextMessage { message: "No .gadget.yaml file provided".to_string() });
+            return Ok(());
+        }
+
         // Add new probes
         let lister = Lister::new();
         for probe in lister.list_all() {
@@ -419,7 +424,7 @@ impl Commander {
             let id = self.get_new_source_id();
 
             if let Some(target) = self
-                .target_cfg
+                .target_cfg.as_ref().unwrap()
                 .targets
                 .iter()
                 .filter(|t| t.probe_id == *probe.serial_number.as_ref().unwrap())

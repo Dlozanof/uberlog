@@ -2,7 +2,7 @@ use std::{
     fs::{self, File},
     io::Write,
 };
-
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,8 +96,10 @@ impl ApplicationConfiguration {
     }
 }
 
-pub fn load_target_cfg() -> TargetConfiguration {
-    let cfg_string = fs::read_to_string(".gadget.yaml").expect("Unable to read configuration file");
-    let cfg: TargetConfiguration = serde_yaml::from_str(&cfg_string).expect("Bad");
-    cfg
+pub fn load_target_cfg() -> Result<TargetConfiguration, anyhow::Error> {
+    let cfg_string = fs::read_to_string(".gadget.yaml").context("Unable to open .gadget.yaml file")?;
+    let cfg: TargetConfiguration = serde_yaml::from_str(&cfg_string).context("Failed to parse file")?;
+
+    tracing::info!("All good");
+    Ok(cfg)
 }

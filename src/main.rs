@@ -73,9 +73,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     info!("Starting app");
+
     // Load configuration file
-    let target_cfg = configuration::load_target_cfg();
     let app_cfg = ApplicationConfiguration::load_cfg();
+
+    // Define operation mode
+    let target_cfg = match configuration::load_target_cfg() {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            info!("{}", e);
+            None
+        }
+    };
 
     // Prepare communication layer for gui-commander and commander-commander trheads
     let (commander_tx, commander_rx) = std::sync::mpsc::channel();
