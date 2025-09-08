@@ -98,19 +98,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         &app_cfg,
     );
 
-    // Register commands -- File
     app.command_parser
-        .register_instruction(String::from(":stream_in"), commander::stream_file);
-    app.command_parser
-        .register_instruction(String::from(":stream_out"), commander::stream_start);
-    app.command_parser
-        .register_instruction(String::from(":stream_out_stop"), commander::stream_stop);
-    // Register commands -- Internal
-    app.command_parser
-        .register_instruction(String::from(":find"), commander::find_log);
-    // Register commands -- Filter
-    app.command_parser
-        .register_instruction(String::from(":filter"), commander::add_filter);
+        // Fie commands
+        .register_instruction(":stream_in", commander::stream_file)
+        .register_instruction(":stream_out", commander::stream_start)
+        .register_instruction(":stream_out_stop", commander::stream_stop)
+        // Internal commands
+        .register_instruction(":find", commander::find_log)
+        // Filter commands
+        .register_instruction(":filter", commander::add_filter);
 
     // Commander main loop
     let rt = Runtime::new().expect("Unable to create Runtime");

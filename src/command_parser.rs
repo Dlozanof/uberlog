@@ -50,11 +50,16 @@ impl CommandParser {
     /// Register an instruction to the command parser
     pub fn register_instruction(
         &mut self,
-        opcode: String,
+        opcode: &str,
         operation: fn(&Sender<Command>, Vec<String>) -> Result<(), String>,
-    ) {
+    ) -> &mut Self {
         self.registered_instructions
-            .push(Instruction { opcode, operation });
+            .push(Instruction { 
+                opcode: String::from(opcode),
+                operation
+            });
+
+        self
     }
 
     // Print message
