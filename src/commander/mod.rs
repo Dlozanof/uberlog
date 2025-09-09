@@ -217,7 +217,7 @@ impl Commander {
                     return self.cmd_reset(source_id);
                 }
                 Command::Reflash(source_id) => {
-                    return self.cmd_reflash(source_id);
+                    return self.reflash_log_source(source_id);
                 }
                 Command::StreamLogs(streaming, path) => {
                     return self.cmd_log_stream(streaming, path);
@@ -408,19 +408,6 @@ impl Commander {
         };
         let _ = probe.target_reset();
         Ok(())
-    }
-
-    /// Reflash the target with the binary from the config file
-    ///
-    /// Issue a reset on the MCU connected to the indicated probe
-    fn cmd_reflash(&mut self, source_id: u32) -> Result<(), String> {
-        // Get the internal index to interact with it
-        let idx = self.get_source_idx(source_id);
-        if idx.is_none() {
-            error!("Log source does not exist! {}", source_id);
-        }
-        let idx = idx.unwrap();
-        return self.cmd_reflash(source_id);
     }
 
     /// Implementation for Command::GetProbes

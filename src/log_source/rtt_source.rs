@@ -61,6 +61,11 @@ impl RttSource {
 impl LogSourceTrait for RttSource {
     fn reflash(&self) -> Result<(), LogSourceError> {
 
+        // Elf file location is saved in the `LogBackend` enum for RTT targets
+        let path = match self.mcu_info.backend {
+            LogBackendInformation::Rtt(path) => path,
+            LogBackendInformation::Uart(_, _ ) => return Err(LogSourceError::NotImplemented)
+        };
         // In order to interact with a device using probe-rs a probe/session are needed
         info!("Opening probe...");
         let probe = self.mcu_info.probe_info.open()?;
