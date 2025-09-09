@@ -61,6 +61,7 @@ pub struct Commander {
 pub enum Command {
     // File
     StreamFile(String),
+    StreamStdin,
     StreamLogs(bool, String),
 
     // LogSources
@@ -101,6 +102,7 @@ impl fmt::Display for Command {
             Command::RefreshProbeInfo => "RefreshProbeInfo",
             Command::StreamLogs(_, _) => "StreamLogs",
             Command::StreamFile(_) => "StreamFile",
+            Command::StreamStdin => "StreamStdin",
             Command::ConnectLogSource(_) => "ConnectLogSource",
             Command::DisconnectLogSource(_) => "DisconnectLogSource",
         };
@@ -227,6 +229,9 @@ impl Commander {
                 }
                 Command::StreamFile(path) => {
                     return self.cmd_stream_file(path);
+                }
+                Command::StreamStdin => {
+                    return self.cmd_stream_stdin();
                 }
                 Command::PrintMessage(msg) => {
                     let _ = self
@@ -440,13 +445,13 @@ impl Commander {
                 let mut current_serials: Vec<String> = Vec::new();
                 for source in &mut self.log_sources {
                     match source {
-                        LogSource::FileSource(_) => (),
                         LogSource::RttSource(s) => {
                             current_serials.push(s.get_probe_state().serial_number.clone().unwrap());
                         },
                         LogSource::UartSource(s) => {
                             current_serials.push(s.get_probe_state().serial_number.clone().unwrap());
-                        }                            
+                        }
+                        _ => (),
                     }
                 }
 
@@ -505,6 +510,7 @@ impl Commander {
         for i in 0..self.log_sources.len() {
             let keep_source = match &mut self.log_sources[i] {
                 LogSource::FileSource(_) => true,
+                LogSource::StdinSource(_) => true,
                 LogSource::RttSource(s) => {
                     available_probes_serials.contains(s.get_probe_state().serial_number.as_ref().unwrap())
                 },

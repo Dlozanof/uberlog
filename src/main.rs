@@ -1,4 +1,4 @@
-use std::{fs::OpenOptions, time::Duration};
+use std::{fs::OpenOptions, io::IsTerminal, time::Duration};
 
 use tracing::{Level, error, info, span};
 use tracing_subscriber::{Registry, fmt, prelude::*};
@@ -118,6 +118,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Register commands -- Filter
     app.command_parser
         .register_instruction(String::from(":filter"), commander::add_filter);
+
+    
+    // If STDIN is tty, create the log source for it
+    if !io::stdin().is_terminal() {
+        let _ = commander_tx.send(Command::StreamStdin);
+    }
 
     // Commander main loop
     let rt = Runtime::new().expect("Unable to create Runtime");

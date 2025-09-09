@@ -2,12 +2,37 @@ use std::io::Write;
 
 use tracing::error;
 
-use crate::log_source::{FileSource, LogSource, LogSourceTrait};
+use crate::log_source::{FileSource, LogSource, LogSourceTrait, StdinSource};
 
 pub use super::Commander;
 use super::UiCommand;
 
 impl Commander {
+
+    /// Stream stdin
+    pub(crate) fn cmd_stream_stdin(&mut self) -> Result<(), String> {
+        // Get new source ID
+        let id = self.get_new_source_id();
+
+        // Create and connect it
+        let mut new_source = StdinSource::new(id, self.command_tx.clone());
+        new_source.connect();
+
+        // Store it
+        self.log_sources.push(LogSource::StdinSource(new_source));
+
+        // Let UI know of the change
+        let _ = self.command_response_tx.send(UiCommand::AddNewSource(
+            id,
+            self.log_sources.last().unwrap().id_string(),
+        ));
+        let _ = self
+            .command_response_tx
+            .send(UiCommand::SetConnectionSource(id, true));
+
+        Ok(())
+    }
+
     /// Stream file
     pub(crate) fn cmd_stream_file(&mut self, path: String) -> Result<(), String> {
         // Get new source ID

@@ -1,6 +1,7 @@
 pub mod file_source;
 pub mod rtt_source;
 pub mod uart_source;
+pub mod stdin_source;
 
 use thiserror::Error;
 
@@ -31,6 +32,7 @@ pub enum LogSource {
     FileSource(FileSource),
     UartSource(UartSource),
     RttSource(RttSource),
+    StdinSource(StdinSource),
 }
 
 impl LogSourceTrait for LogSource {
@@ -39,6 +41,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.connect(),
             LogSource::UartSource(s) => s.connect(),
             LogSource::RttSource(s) => s.connect(),
+            LogSource::StdinSource(s) => s.connect(),
         }
     }
     fn disconnect(&mut self) {
@@ -46,6 +49,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.disconnect(),
             LogSource::UartSource(s) => s.disconnect(),
             LogSource::RttSource(s) => s.disconnect(),
+            LogSource::StdinSource(s) => s.disconnect(),
         }
     }
     fn id_eq(&self, id: u32) -> bool {
@@ -53,6 +57,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.id_eq(id),
             LogSource::UartSource(s) => s.id_eq(id),
             LogSource::RttSource(s) => s.id_eq(id),
+            LogSource::StdinSource(s) => s.id_eq(id),
         }
     }
     fn id(&self) -> u32 {
@@ -60,6 +65,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.id(),
             LogSource::UartSource(s) => s.id(),
             LogSource::RttSource(s) => s.id(),
+            LogSource::StdinSource(s) => s.id(),
         }
     }
     fn id_string(&self) -> String {
@@ -67,6 +73,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.id_string(),
             LogSource::UartSource(s) => s.id_string(),
             LogSource::RttSource(s) => s.id_string(),
+            LogSource::StdinSource(s) => s.id_string(),
         }
     }
     fn take_storage(&mut self) -> Option<Vec<u8>> {
@@ -74,6 +81,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.take_storage(),
             LogSource::UartSource(s) => s.take_storage(),
             LogSource::RttSource(s) => s.take_storage(),
+            LogSource::StdinSource(s) => s.take_storage(),
         }
     }
     fn set_storage(&mut self, bytes: Vec<u8>) {
@@ -81,6 +89,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.set_storage(bytes),
             LogSource::UartSource(s) => s.set_storage(bytes),
             LogSource::RttSource(s) => s.set_storage(bytes),
+            LogSource::StdinSource(s) => s.set_storage(bytes),
         }
     }
     fn reflash(&self) -> Result<(), LogSourceError> {
@@ -88,6 +97,7 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => Err(LogSourceError::NotImplemented),
             LogSource::UartSource(s) => Err(LogSourceError::NotImplemented),
             LogSource::RttSource(s) => s.reflash(),
+            LogSource::StdinSource(s) => Err(LogSourceError::NotImplemented),
         }
     }
 }
@@ -95,3 +105,4 @@ impl LogSourceTrait for LogSource {
 pub use file_source::FileSource;
 pub use rtt_source::RttSource;
 pub use uart_source::UartSource;
+pub use stdin_source::StdinSource;
