@@ -74,10 +74,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("Starting app");
 
-    // Load configuration file
+    // Load configuration files
     let app_cfg = ApplicationConfiguration::load_cfg();
-
-    // Define operation mode
     let target_cfg = match configuration::load_target_cfg() {
         Ok(cfg) => Some(cfg),
         Err(e) => {

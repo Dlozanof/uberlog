@@ -1,9 +1,9 @@
-use probe_rs::probe::DebugProbeInfo;
+use probe_rs::{flashing, probe::DebugProbeInfo, Permissions};
 use tracing::{debug, error, info, warn};
 
 use crate::commander::{Command, LogBackendInformation, TargetMcu};
 
-use super::LogSourceTrait;
+use super::{LogSourceError, LogSourceTrait};
 
 use core::time;
 use std::{
@@ -54,6 +54,17 @@ impl UartSource {
 }
 
 impl LogSourceTrait for UartSource {
+    fn reflash(&self) -> Result<(), LogSourceError> {
+
+        // In order to interact with a device using probe-rs a probe/session are needed
+        info!("Opening probe...");
+        let probe = self.mcu_info.probe_info.open()?;
+        let mut session = probe.attach(self.mcu_info.mcu.clone(), Permissions::default())?;
+        flashing::download_file(&mut session, "testfile", probe_rs::flashing::Format::Elf)?;
+
+        Ok(())
+    }
+    
     fn connect(&mut self) {
         if self.is_connected {
             warn!("Already connected ({})", self.mcu_info.name);

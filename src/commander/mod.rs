@@ -11,6 +11,7 @@ use crate::{
 };
 use elf::{ElfBytes, endian::AnyEndian};
 use probe_rs::probe::{DebugProbeInfo, list::Lister};
+use probe_rs::flashing;
 use ratatui::style::{Modifier, Style};
 use tracing::{debug, error, info, warn};
 
@@ -69,6 +70,7 @@ pub enum Command {
     // Probes
     RefreshProbeInfo,
     Reset(u32),
+    Reflash(u32),
 
     // Misc
     PrintMessage(String),
@@ -92,6 +94,7 @@ impl fmt::Display for Command {
             Command::ParseLogBytes(_, _) => "ParseLogBytes",
             Command::ClearFilters => "ClearFilters",
             Command::Reset(_) => "Reset",
+            Command::Reflash(_) => "Reflash",
             Command::AddFilter(_) => "AddFilter",
             Command::PrintMessage(_) => "PrintMessage",
             Command::FindLog(_) => "FindLog",
@@ -212,6 +215,9 @@ impl Commander {
                 }
                 Command::Reset(source_id) => {
                     return self.cmd_reset(source_id);
+                }
+                Command::Reflash(source_id) => {
+                    return self.cmd_reflash(source_id);
                 }
                 Command::StreamLogs(streaming, path) => {
                     return self.cmd_log_stream(streaming, path);
@@ -402,6 +408,19 @@ impl Commander {
         };
         let _ = probe.target_reset();
         Ok(())
+    }
+
+    /// Reflash the target with the binary from the config file
+    ///
+    /// Issue a reset on the MCU connected to the indicated probe
+    fn cmd_reflash(&mut self, source_id: u32) -> Result<(), String> {
+        // Get the internal index to interact with it
+        let idx = self.get_source_idx(source_id);
+        if idx.is_none() {
+            error!("Log source does not exist! {}", source_id);
+        }
+        let idx = idx.unwrap();
+        return self.cmd_reflash(source_id);
     }
 
     /// Implementation for Command::GetProbes

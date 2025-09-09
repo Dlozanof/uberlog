@@ -30,3 +30,4 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 ansi-to-tui = "7.0.0"
 shell-words = "1.1.0"
 anyhow = "1.0.99"
+thiserror = "2.0.16"

@@ -2,6 +2,20 @@ pub mod file_source;
 pub mod rtt_source;
 pub mod uart_source;
 
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum LogSourceError {
+    #[error(transparent)]
+    DebugProbeError(#[from] probe_rs::probe::DebugProbeError),
+    #[error(transparent)]
+    ProbeRsError(#[from] probe_rs::Error),
+    #[error(transparent)]
+    FlashingError(#[from] probe_rs::flashing::FileDownloadError),
+    #[error("This function is not implemented")]
+    NotImplemented,
+}
+
 pub trait LogSourceTrait {
     fn connect(&mut self);
     fn disconnect(&mut self);
@@ -10,6 +24,7 @@ pub trait LogSourceTrait {
     fn id_string(&self) -> String;
     fn take_storage(&mut self) -> Option<Vec<u8>>;
     fn set_storage(&mut self, bytes: Vec<u8>);
+    fn reflash(&self) -> Result<(), LogSourceError>;
 }
 
 pub enum LogSource {
@@ -66,6 +81,13 @@ impl LogSourceTrait for LogSource {
             LogSource::FileSource(s) => s.set_storage(bytes),
             LogSource::UartSource(s) => s.set_storage(bytes),
             LogSource::RttSource(s) => s.set_storage(bytes),
+        }
+    }
+    fn reflash(&self) -> Result<(), LogSourceError> {
+        match self {
+            LogSource::FileSource(s) => Err(LogSourceError::NotImplemented),
+            LogSource::UartSource(s) => Err(LogSourceError::NotImplemented),
+            LogSource::RttSource(s) => s.reflash(),
         }
     }
 }

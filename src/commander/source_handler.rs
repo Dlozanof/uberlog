@@ -54,4 +54,13 @@ impl Commander {
 
         Ok(())
     }
+
+    /// Reflash a MCU
+    pub(crate) fn reflash_log_source(&mut self, id: u32) -> Result<(), String> {
+        if let Some(idx) = self.get_source_idx(id) {
+            self.log_sources[idx].reflash().expect("Oh boy");
+        }
+
+        Ok(())
+    }
 }

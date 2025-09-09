@@ -2,7 +2,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::commander::Command;
 
-use super::LogSourceTrait;
+use super::{LogSourceError, LogSourceTrait};
 
 use core::time;
 use std::{
@@ -50,6 +50,10 @@ impl FileSource {
 }
 
 impl LogSourceTrait for FileSource {
+    fn reflash(&self) -> Result<(), LogSourceError> {
+        Ok(())
+    }
+
     fn connect(&mut self) {
         // Validate status
         if self.is_connected {
