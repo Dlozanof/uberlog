@@ -2,11 +2,7 @@ use std::sync::mpsc::Sender;
 
 use crossterm::event::KeyCode;
 use ratatui::{
-    Frame,
-    layout::Rect,
-    style::{Modifier, Style},
-    text::Line,
-    widgets::{Block, BorderType, Borders, Paragraph},
+    layout::{Constraint, Direction, Layout, Rect}, style::{Modifier, Style}, text::Line, widgets::{Block, BorderType, Borders, Gauge, Paragraph}, Frame
 };
 use tracing::error;
 
@@ -23,6 +19,11 @@ struct SourceInformation {
 
     /// ID coming from Commander, use to identify it
     id: u32,
+
+    /// Some sources have operations that take time, like flashing new code,
+    /// this variable holds the state of the progress and the name of the stage
+    progress: u16,
+    progress_stage: String,
 }
 
 impl SourceInformation {
@@ -31,6 +32,8 @@ impl SourceInformation {
             id,
             name,
             connected: false,
+            progress: 0,
+            progress_stage: String::new(),
         }
     }
 
@@ -44,6 +47,11 @@ impl SourceInformation {
 
     fn get_name(&self) -> String {
         self.name.clone()
+    }
+
+    fn set_progress(&mut self, progress: u16, progress_stage: String) {
+        self.progress = progress;
+        self.progress_stage = progress_stage;
     }
 }
 
@@ -87,6 +95,15 @@ impl SectionSources {
         }
     }
 
+    pub fn source_set_progress(&mut self, id: u32, progress: u16, progress_stage: String) {
+        if let Some(idx) = self.get_source_idx(id) {
+            self.sources[idx].set_progress(progress, progress_stage);
+            return;
+        } else {
+            error!("Unable to set progress of source with ID {}, does not exist", id);
+        }
+    }
+
     fn get_source_idx(&self, id: u32) -> Option<usize> {
         for (idx, source) in self.sources.iter().enumerate() {
             if source.id == id {
@@ -96,27 +113,42 @@ impl SectionSources {
 
         return None;
     }
+
+    fn draw_source_info(&mut self, frame: &mut Frame, area: Rect, idx: usize) {
+
+        let source_info = self.sources.get(idx).unwrap();
+        let status = match source_info.is_connected() {
+            true => "Connected",
+            false => "Not connected",
+        };
+
+        // Create line and make it Bold if it is the currently selected source
+        let mut line = Line::from(format!(" {} | {} {}", status, source_info.get_name(), source_info.progress_stage));
+        if idx == self.selected_source_idx {
+            line.style = line.style.add_modifier(Modifier::BOLD);
+        }
+
+        frame.render_widget(line, area);
+    }
+
+    fn draw_source_extra_info(&mut self, frame: &mut Frame, area: Rect, idx: usize) {
+
+        let source_info = self.sources.get(idx).unwrap();
+        if source_info.progress != 0 {
+            let gauge = Gauge::default()
+                //.gauge_style(GAUGE1_COLOR)
+                .percent(source_info.progress);
+            frame.render_widget(gauge, area);
+        }
+
+    }
 }
 
 impl LayoutSection for SectionSources {
+
     fn ui(&mut self, frame: &mut Frame, area: Rect) {
-        // Probe information
-        let mut source_list_lines = Vec::new();
 
-        for (idx, info) in self.sources.iter().enumerate() {
-            let status = match info.is_connected() {
-                true => "Connected",
-                false => "Not connected",
-            };
-
-            // Create line and make it Bold if it is the currently selected source
-            let mut line = Line::from(format!(" {} | {}", status, info.get_name()));
-            if idx == self.selected_source_idx {
-                line.style = line.style.add_modifier(Modifier::BOLD);
-            }
-
-            source_list_lines.push(line);
-        }
+        // Block
         let probse_block_title = Line::from("Log Sources");
         let probes_block = Block::default()
             .title(probse_block_title)
@@ -124,8 +156,41 @@ impl LayoutSection for SectionSources {
             .border_type(BorderType::Double)
             .style(Style::default());
 
-        let probe_list = Paragraph::new(source_list_lines).block(probes_block);
-        frame.render_widget(probe_list, area);
+        // Get the inner area before consuming probes_block
+        let inner_area = probes_block.inner(area);
+
+        // Render the block
+        frame.render_widget(probes_block, area);
+
+        // Early return if there is nothing to do
+        if self.sources.is_empty() {
+            return;
+        }
+        
+        // Otherwise fill the contents of the block
+        let row_height = 1;
+
+        let constraints: Vec<Constraint> = (0..self.sources.len())
+            .map(|_| Constraint::Length(row_height)).collect();
+
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(inner_area);
+        
+        for (idx, row_area) in rows.iter().enumerate() {
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Min(area.width / 2),  // Section 1
+                    Constraint::Min(1),               // Section 2
+                ])
+                .split(*row_area);
+            // Draw the Section 1
+            self.draw_source_info(frame, chunks[0], idx);
+            // Draw the Section 2
+            self.draw_source_extra_info(frame, chunks[1], idx);
+        }
     }
 
     fn process_key(&mut self, key: crossterm::event::KeyCode) {

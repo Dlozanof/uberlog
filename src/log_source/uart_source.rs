@@ -1,7 +1,7 @@
-use probe_rs::{flashing, probe::DebugProbeInfo, Permissions, Session};
+use probe_rs::{flashing::{self, FlashProgress}, probe::DebugProbeInfo, Permissions, Session};
 use tracing::{debug, error, info, warn};
 
-use crate::commander::{Command, LogBackendInformation, TargetMcu};
+use crate::commander::{Command, LogBackendInformation, TargetMcu, UiCommand};
 
 use super::{LogSourceError, LogSourceTrait};
 
@@ -19,8 +19,10 @@ pub struct UartSource {
     /// Send channel to gracefully shutdown the thread
     thread_control_tx: Option<Sender<bool>>,
 
-    /// Send channel to Commander
+    /// Send channel to Commander, needed for spawned threads
     command_tx: Sender<Command>,
+
+    ui_command_tx: Sender<UiCommand>,
 
     /// Holds state
     is_connected: bool,
@@ -39,11 +41,12 @@ pub struct UartSource {
 }
 
 impl UartSource {
-    pub fn new(id: u32, mcu_info: TargetMcu, command_tx: Sender<Command>) -> UartSource {
+    pub fn new(id: u32, mcu_info: TargetMcu, command_tx: Sender<Command>, ui_command_tx: Sender<UiCommand>) -> UartSource {
         UartSource {
             id,
             mcu_info,
             command_tx,
+            ui_command_tx,
             handle: None,
             thread_control_tx: None,
             is_connected: false,
@@ -65,7 +68,94 @@ impl LogSourceTrait for UartSource {
             return Err(LogSourceError::NotImplemented);
         }
 
-        flashing::download_file(self.current_session.as_mut().unwrap(), "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf", probe_rs::flashing::Format::Elf)?;
+        // Use Arc<Mutex<>> to share state between the closure calls
+        let total_erase_size = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+        let erased_bytes = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+        let total_program_length = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+        let programmed_bytes = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+        let ui_command_tx = self.ui_command_tx.clone();
+        let source_id = self.id;
+        
+        let progress = FlashProgress::new(move |event| {
+            match event {
+                probe_rs::flashing::ProgressEvent::Initialized { phases, .. } => {
+                    // Calculate total erase size from phases
+                    let total_erase: u64 = phases.iter()
+                        .flat_map(|phase| phase.sectors())  // Changed from erase_sectors to sectors
+                        .map(|sector| sector.size())
+                        .sum();
+                    
+                    if let Ok(mut total) = total_erase_size.lock() {
+                        *total = total_erase;
+                    }
+                    
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 0, "Initialized".to_string()));
+                }
+                probe_rs::flashing::ProgressEvent::StartedFilling => {
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 5, "Filling".to_string()));
+                }
+                probe_rs::flashing::ProgressEvent::FinishedFilling => {
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 10, "Filling complete".to_string()));
+                }
+                probe_rs::flashing::ProgressEvent::StartedErasing => {
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 15, "Erasing".to_string()));
+                }
+                probe_rs::flashing::ProgressEvent::SectorErased { size, .. } => {
+                    // Accumulate erased bytes and calculate percentage
+                    if let (Ok(mut erased), Ok(total)) = (erased_bytes.lock(), total_erase_size.lock()) {
+                        *erased += size;
+                        
+                        if *total > 0 {
+                            // Map erase progress from 15% to 40% (erasing phase)
+                            let progress_ratio = *erased as f64 / *total as f64;
+                            let percentage = (15.0 + (progress_ratio * 25.0)) as u16; // 15% to 40%
+                            let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, percentage, format!("Erasing... {}/{} bytes", erased, total)));
+                        }
+                    }
+                }
+                probe_rs::flashing::ProgressEvent::FinishedErasing => {
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 40, "Erasing complete".to_string()));
+                }
+                probe_rs::flashing::ProgressEvent::StartedProgramming { length } => {
+                    // Store the total length for progress calculation
+                    if let Ok(mut total) = total_program_length.lock() {
+                        *total = length;
+                    }
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 45, "Programming".to_string()));
+                }
+                probe_rs::flashing::ProgressEvent::PageProgrammed { size, .. } => {
+                    // Accumulate programmed bytes and calculate percentage
+                    if let (Ok(mut programmed), Ok(total)) = (programmed_bytes.lock(), total_program_length.lock()) {
+                        *programmed += size as u64;
+                        
+                        if *total > 0 {
+                            // Map programming progress from 45% to 95% (programming phase)
+                            let progress_ratio = *programmed as f64 / *total as f64;
+                            let percentage = (45.0 + (progress_ratio * 50.0)) as u16; // 45% to 95%
+                            let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, percentage, format!("Programming... {}/{} bytes", programmed, total)));
+                        }
+                    }
+                }
+                probe_rs::flashing::ProgressEvent::FinishedProgramming => {
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 0, String::new()));
+                }
+                probe_rs::flashing::ProgressEvent::FailedProgramming |
+                probe_rs::flashing::ProgressEvent::FailedErasing |
+                probe_rs::flashing::ProgressEvent::FailedFilling => {
+                    // Handle failures - reset progress and show error
+                    let _ = ui_command_tx.send(UiCommand::SetProgress(source_id, 0, "Flash failed".to_string()));
+                }
+                _ => {
+                    // Handle other events if needed
+                }
+            }
+        });
+
+
+        let mut options = flashing::DownloadOptions::default();
+        options.progress = Some(progress);
+
+        flashing::download_file_with_options(self.current_session.as_mut().unwrap(), "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf", probe_rs::flashing::Format::Elf, options)?;
         self.reset()?;
         Ok(())
     }

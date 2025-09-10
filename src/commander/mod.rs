@@ -120,6 +120,7 @@ pub enum UiCommand {
     AddNewSource(u32 /* ID */, String /* Text to display */),
     RemoveSource(u32 /* ID */),
     SetConnectionSource(u32 /* ID */, bool /* Is connected */),
+    SetProgress(u32 /* ID */, u16 /* Progress % */, String /* Stage */),
 
     /// Filters
     UpdateFilterList(Vec<LogFilter>),
@@ -135,6 +136,7 @@ impl fmt::Display for UiCommand {
             UiCommand::TextMessage { message: _ } => "TextMessage",
             UiCommand::AddNewSource(_, _) => "AddNewSource",
             UiCommand::SetConnectionSource(_, _) => "SetConnectionSource",
+            UiCommand::SetProgress(_, _, _) => "SetProgress",
             UiCommand::UpdateFilterList(_) => "UpdateFilterList",
             UiCommand::UpdateLogs(_) => "UpdateLogs",
             UiCommand::UpdateSearchLog(_) => "UpdateSearchLog",
@@ -456,7 +458,7 @@ impl Commander {
                     }
                     LogBackend::Uart { dev: _, baud: _ } => {
                         // Create the log source
-                        let new_source = UartSource::new(id, new_target, self.command_tx.clone());
+                        let new_source = UartSource::new(id, new_target, self.command_tx.clone(), self.command_response_tx.clone());
                         // Store it
                         self.log_sources.push(LogSource::UartSource(new_source));
                     }

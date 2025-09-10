@@ -291,6 +291,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                 UiCommand::RemoveSource(id) => {
                     app.section_probes.delete_source(id);
                 }
+                UiCommand::SetProgress(id, progress, progress_stage) => {
+                    app.section_probes.source_set_progress(id, progress, progress_stage);
+                }
             }
         }
 
