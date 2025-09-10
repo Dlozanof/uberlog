@@ -1,4 +1,4 @@
-use probe_rs::{flashing, probe::DebugProbeInfo, Permissions};
+use probe_rs::{flashing, probe::DebugProbeInfo, Permissions, Session};
 use tracing::{debug, error, info, warn};
 
 use crate::commander::{Command, LogBackendInformation, TargetMcu};
@@ -33,6 +33,9 @@ pub struct UartSource {
 
     /// Log processing storage
     storage: Option<Vec<u8>>,
+
+    /// Session contains the debug session state
+    current_session: Option<Session>,
 }
 
 impl UartSource {
@@ -45,6 +48,7 @@ impl UartSource {
             thread_control_tx: None,
             is_connected: false,
             storage: None,
+            current_session: None,
         }
     }
 
@@ -54,14 +58,15 @@ impl UartSource {
 }
 
 impl LogSourceTrait for UartSource {
-    fn reflash(&self) -> Result<(), LogSourceError> {
+    fn reflash(&mut self) -> Result<(), LogSourceError> {
 
-        // In order to interact with a device using probe-rs a probe/session are needed
-        info!("Opening probe...");
-        let probe = self.mcu_info.probe_info.open()?;
-        let mut session = probe.attach(self.mcu_info.mcu.clone(), Permissions::default())?;
-        flashing::download_file(&mut session, "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf", probe_rs::flashing::Format::Elf)?;
+        if self.current_session.is_none() {
+            error!("Session was not created");
+            return Err(LogSourceError::NotImplemented);
+        }
 
+        flashing::download_file(self.current_session.as_mut().unwrap(), "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf", probe_rs::flashing::Format::Elf)?;
+        self.reset()?;
         Ok(())
     }
     
@@ -75,6 +80,23 @@ impl LogSourceTrait for UartSource {
                 "Unexpected state, app thinks this source is disconnected but the thread and/or metadata still exists. Disconnecting for cleanup"
             );
             self.disconnect();
+        }
+
+        // Init of current_session
+        if self.current_session.is_none() {
+            info!("Opening probe...");
+            let probe = match self.mcu_info.probe_info.open() {
+                Ok(probe) => probe,
+                Err(e) => {
+                    error!("{}", e.to_string());
+                    self.disconnect();
+                    return;
+                }
+            };
+            self.current_session = match probe.attach(self.mcu_info.mcu.clone(), Permissions::default()) {
+                Ok(s) => Some(s),
+                Err(_) => None,
+            }
         }
 
         // Create communication channel for sending data to the thread
@@ -192,6 +214,19 @@ impl LogSourceTrait for UartSource {
         } else {
             error!("Thread handle is None");
         }
+    }
+
+    fn reset(&mut self) -> Result<(), LogSourceError> {
+        if self.current_session.is_none() {
+            error!("Session was not created");
+            return Err(LogSourceError::NotImplemented);
+        }
+
+        let session = self.current_session.as_mut().unwrap();
+        let mut core = session.core(0)?;
+        core.reset()?;
+
+        Ok(())
     }
 
     fn id_eq(&self, id: u32) -> bool {

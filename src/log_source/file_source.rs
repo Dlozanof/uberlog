@@ -50,7 +50,7 @@ impl FileSource {
 }
 
 impl LogSourceTrait for FileSource {
-    fn reflash(&self) -> Result<(), LogSourceError> {
+    fn reflash(&mut self) -> Result<(), LogSourceError> {
         Ok(())
     }
 
@@ -163,6 +163,10 @@ impl LogSourceTrait for FileSource {
         } else {
             error!("Thread handle is None");
         }
+    }
+
+    fn reset(&mut self) -> Result<(), LogSourceError> {
+        Ok(())
     }
 
     fn id_eq(&self, id: u32) -> bool {

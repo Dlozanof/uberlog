@@ -59,7 +59,7 @@ impl RttSource {
 }
 
 impl LogSourceTrait for RttSource {
-    fn reflash(&self) -> Result<(), LogSourceError> {
+    fn reflash(&mut self) -> Result<(), LogSourceError> {
 
         // Elf file location is saved in the `LogBackend` enum for RTT targets
         let path = "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf";
@@ -209,6 +209,16 @@ impl LogSourceTrait for RttSource {
         } else {
             error!("Thread handle is None");
         }
+    }
+
+    fn reset(&mut self) -> Result<(), LogSourceError> {
+        let probe = self.mcu_info.probe_info.open()?;
+        let mut session = probe.attach_under_reset(self.mcu_info.mcu.clone(), Permissions::default())?;
+        let mut core = session.core(0)?;
+
+        core.reset()?;
+
+        Ok(())
     }
 
     fn id_eq(&self, id: u32) -> bool {

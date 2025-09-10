@@ -20,12 +20,13 @@ pub enum LogSourceError {
 pub trait LogSourceTrait {
     fn connect(&mut self);
     fn disconnect(&mut self);
+    fn reset(&mut self) -> Result<(), LogSourceError>;
     fn id_eq(&self, id: u32) -> bool;
     fn id(&self) -> u32;
     fn id_string(&self) -> String;
     fn take_storage(&mut self) -> Option<Vec<u8>>;
     fn set_storage(&mut self, bytes: Vec<u8>);
-    fn reflash(&self) -> Result<(), LogSourceError>;
+    fn reflash(&mut self) -> Result<(), LogSourceError>;
 }
 
 pub enum LogSource {
@@ -50,6 +51,14 @@ impl LogSourceTrait for LogSource {
             LogSource::UartSource(s) => s.disconnect(),
             LogSource::RttSource(s) => s.disconnect(),
             LogSource::StdinSource(s) => s.disconnect(),
+        }
+    }
+    fn reset(&mut self) -> Result<(), LogSourceError> {
+        match self {
+            LogSource::FileSource(s) => s.reset(),
+            LogSource::UartSource(s) => s.reset(),
+            LogSource::RttSource(s) => s.reset(),
+            LogSource::StdinSource(s) => s.reset(),
         }
     }
     fn id_eq(&self, id: u32) -> bool {
@@ -92,7 +101,7 @@ impl LogSourceTrait for LogSource {
             LogSource::StdinSource(s) => s.set_storage(bytes),
         }
     }
-    fn reflash(&self) -> Result<(), LogSourceError> {
+    fn reflash(&mut self) -> Result<(), LogSourceError> {
         match self {
             LogSource::FileSource(s) => Err(LogSourceError::NotImplemented),
             LogSource::UartSource(s) => s.reflash(),

@@ -55,10 +55,25 @@ impl Commander {
         Ok(())
     }
 
+    /// Reset MCU
+    pub(crate) fn reset_log_source(&mut self, id: u32) -> Result<(), String> {
+        if let Some(idx) = self.get_source_idx(id) {
+            match self.log_sources[idx].reset() {
+                Ok(_) => return Ok(()),
+                Err(e) => return Err(e.to_string())
+            }
+        }
+
+        Ok(())
+    }
+
     /// Reflash a MCU
     pub(crate) fn reflash_log_source(&mut self, id: u32) -> Result<(), String> {
         if let Some(idx) = self.get_source_idx(id) {
-            self.log_sources[idx].reflash().expect("Oh boy");
+            match self.log_sources[idx].reflash() {
+                Ok(_) => return Ok(()),
+                Err(e) => return Err(e.to_string())
+            }
         }
 
         Ok(())

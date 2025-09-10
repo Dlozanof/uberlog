@@ -216,7 +216,7 @@ impl Commander {
                     return self.cmd_refresh_probe_info();
                 }
                 Command::Reset(source_id) => {
-                    return self.cmd_reset(source_id);
+                    return self.reset_log_source(source_id);
                 }
                 Command::Reflash(source_id) => {
                     return self.reflash_log_source(source_id);
@@ -382,36 +382,6 @@ impl Commander {
         let (_, b) = log_bytes.split_at(count);
         self.log_sources[idx].set_storage(Vec::from(b));
 
-        Ok(())
-    }
-
-    /// Reset target
-    ///
-    /// Issue a reset on the MCU connected to the indicated probe
-    fn cmd_reset(&mut self, source_id: u32) -> Result<(), String> {
-        // Get the internal index to interact with it
-        let idx = self.get_source_idx(source_id);
-        if idx.is_none() {
-            error!("Log source does not exist! {}", source_id);
-        }
-        let idx = idx.unwrap();
-
-        // Get the probe-rs state
-        let probe_info_ref = match &mut self.log_sources[idx] {
-            LogSource::RttSource(p) => p.get_probe_state(),
-            LogSource::UartSource(p) => p.get_probe_state(),
-            _ => {
-                warn!("This kind of probe cannot execute a reset!");
-                return Ok(()); // Not an error
-            }
-        };
-
-        // Use it to issue a reset
-        let mut probe = match probe_info_ref.open() {
-            Err(e) => return Err(format!("{}", e)),
-            Ok(val) => val,
-        };
-        let _ = probe.target_reset();
         Ok(())
     }
 
