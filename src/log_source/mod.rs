@@ -95,7 +95,7 @@ impl LogSourceTrait for LogSource {
     fn reflash(&self) -> Result<(), LogSourceError> {
         match self {
             LogSource::FileSource(s) => Err(LogSourceError::NotImplemented),
-            LogSource::UartSource(s) => Err(LogSourceError::NotImplemented),
+            LogSource::UartSource(s) => s.reflash(),
             LogSource::RttSource(s) => s.reflash(),
             LogSource::StdinSource(s) => Err(LogSourceError::NotImplemented),
         }

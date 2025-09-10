@@ -62,15 +62,13 @@ impl LogSourceTrait for RttSource {
     fn reflash(&self) -> Result<(), LogSourceError> {
 
         // Elf file location is saved in the `LogBackend` enum for RTT targets
-        let path = match self.mcu_info.backend {
-            LogBackendInformation::Rtt(path) => path,
-            LogBackendInformation::Uart(_, _ ) => return Err(LogSourceError::NotImplemented)
-        };
+        let path = "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf";
         // In order to interact with a device using probe-rs a probe/session are needed
         info!("Opening probe...");
         let probe = self.mcu_info.probe_info.open()?;
-        let mut session = probe.attach(self.mcu_info.mcu.clone(), Permissions::default())?;
-        flashing::download_file(&mut session, "testfile", probe_rs::flashing::Format::Elf)?;
+        let mut session = probe.attach_under_reset(self.mcu_info.mcu.clone(), Permissions::default())?;
+        info!("All ok");
+        //flashing::download_file(&mut session, path, probe_rs::flashing::Format::Elf)?;
 
         Ok(())
     }

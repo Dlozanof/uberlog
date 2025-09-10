@@ -184,7 +184,7 @@ impl LayoutSection for SectionSources {
                     .command_tx
                     .send(Command::Reset(self.sources[self.selected_source_idx].id));
             }
-            KeyCode::Char('F') => {
+            KeyCode::Char('l') => {
                 let _ = self
                     .command_tx
                     .send(Command::Reflash(self.sources[self.selected_source_idx].id));

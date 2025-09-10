@@ -60,7 +60,7 @@ impl LogSourceTrait for UartSource {
         info!("Opening probe...");
         let probe = self.mcu_info.probe_info.open()?;
         let mut session = probe.attach(self.mcu_info.mcu.clone(), Permissions::default())?;
-        flashing::download_file(&mut session, "testfile", probe_rs::flashing::Format::Elf)?;
+        flashing::download_file(&mut session, "/home/diego/Documents/tasks/elbereth-repo/elbereth/build/zephyr/zephyr.elf", probe_rs::flashing::Format::Elf)?;
 
         Ok(())
     }
